@@ -1,7 +1,7 @@
 /*
 
 	Kernel for running tree-regeneration MCMC on CUDA
-	
+	 
 */
 
 // Kernel that executes on the CUDA device

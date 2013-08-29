@@ -1,6 +1,6 @@
 /*
  * 
- * -- To run on CPU: http://code.google.com/p/gpuocelot/
+ * -- To run on CPU: http://code.google.com/p/gpuocelot/ 
  * 
  * TODO:
  * 	- Fix casting of data_t throughout f_output

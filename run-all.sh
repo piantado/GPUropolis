@@ -1,4 +1,4 @@
-
+ 
 
 ITERATIONS=200000 ## About 1min for each 1k, for Zipf
 BURN_BLOCKS=0 ## Don't need to burn if taking maps and sampling. 

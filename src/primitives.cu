@@ -1,7 +1,7 @@
 /*
 
 	Definitions of primitive operations and constants, and an ENUM to keep track of them all
-
+ 
 */
 
 // https://en.wikipedia.org/wiki/Physical_constant

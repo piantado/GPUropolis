@@ -1,5 +1,5 @@
 /*
-	Simple Bayes functions on hypotheses
+	Simple Bayes functions on hypotheses 
 */
 
 

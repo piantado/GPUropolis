@@ -1,7 +1,7 @@
 /*
  * 
  * 
- */
+ */ 
 
 __device__ data_t f_output(data_t x, hypothesis* h, data_t* stack) {
 

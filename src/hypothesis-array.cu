@@ -1,5 +1,5 @@
 /*
-	Functions for manipulating arrays of hypotheses (on the host)
+	Functions for manipulating arrays of hypotheses (on the host) 
 
 */
 

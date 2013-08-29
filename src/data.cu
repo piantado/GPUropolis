@@ -1,5 +1,5 @@
 /*
-	Functions and structs for manipulating data
+	Functions and structs for manipulating data 
 */
 #include <stdio.h>
 #include <stdlib.h>
