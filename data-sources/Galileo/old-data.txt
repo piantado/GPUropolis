@@ -1,0 +1,10 @@
+# Galileo's data on a falling ball. See: http://exploringdata.net/ws_galil.htm
+# See also, Jeffreys, W. H., and Berger, J. O. (1992), "Ockham's Razor and Bayesian Analysis," American Scientist, 80, 64-72 (Erratum, p. 116). 
+# See also: Galileo at work (Drake) and Jeffrey's theory of probability, where he argues for ockham
+1000	573	10
+800	534	10
+600	495	10
+450	451	10
+300	395	10
+200	337	10
+100	253	10
