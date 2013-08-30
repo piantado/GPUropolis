@@ -1,6 +1,8 @@
 /*
- 
-*/
+ * GPUropolis - 2013 Aug 30 - Steve Piantadosi 
+ * 
+ * Functions for programs. This includes primitives, but these will be migrated to primitives.cu 
+ */
 
 // CONSTANTS, 2-ARY, 1-ARY
 // NUM_OPS stores the number of opsn

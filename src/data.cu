@@ -1,6 +1,9 @@
 /*
-	Functions and structs for manipulating data 
-*/
+ * GPUropolis - 2013 Aug 30 - Steve Piantadosi 
+ * 
+ * Functions and structs for manipulating data
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <assert.h>

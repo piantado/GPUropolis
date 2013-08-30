@@ -1,7 +1,8 @@
 /*
- 
-*/
-
+ * GPUropolis - 2013 Aug 30 - Steve Piantadosi 
+ * 
+ * Hypothesis definitions and functions
+ */
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // Functions for setting and manipulating the program length

@@ -1,12 +1,7 @@
 /*
+ * GPUropolis - 2013 Aug 30 - Steve Piantadosi 
  * 
- * -- To run on CPU: http://code.google.com/p/gpuocelot/ 
- * 
- * TODO:
- * 	- Fix casting of data_t throughout f_output
- * 	- Save the MCMC state and allow resuming
- * 	- Hmm things go faster if we limit the max length. Maybe we can use the prior and figure out how much search time should be allocated to each length, and search over a number of possibilities
-  * 	- We get some problems with multinomial sampling and NTOP somehow...
+ * Main code!
  */
 
 #include <stdio.h>
@@ -144,6 +139,7 @@ int main(int argc, char** argv)
 	string TOP_PATH = OUT_PATH+"/tops.txt";
 // 	string SAMPLE_BINARY_PATH = OUTPATH+"/state"; // just a dump of host_hypotheses
 	string LOG_PATH = OUT_PATH+"/log.txt";
+	string PERFORMANCE_PATH = OUT_PATH+"/performance.txt";
 	
 	// -------------------------------------------------------------------------
 	// Make the RNG replicable
@@ -158,7 +154,8 @@ int main(int argc, char** argv)
 	}
 
 	// -------------------------------------------------------------------------
-	// Write the log
+	// Write the log and performance log
+	
 	FILE* fp = fopen(LOG_PATH.c_str(), "w");
 	if(fp==NULL) { cerr << "*** ERROR: Cannot open file:\t" << LOG_PATH <<"\n"; exit(1);}
 	
@@ -177,9 +174,11 @@ int main(int argc, char** argv)
 	fprintf(fp, "\tProposal: %i\n", PROPOSAL);
 	fprintf(fp, "\tMax program length: %i\n", hMAX_PROGRAM_LENGTH);
 	fprintf(fp, "\n\n");
-	fprintf(fp, "-----------------------------------------------------------------\n");
-	fprintf(fp, "-- Timing info (block, host_time, device_time, samples/second) \n");
-	fprintf(fp, "-----------------------------------------------------------------\n");
+	fclose(fp);
+	
+	fp = fopen(PERFORMANCE_PATH.c_str(), "w");
+	if(fp==NULL) { cerr << "*** ERROR: Cannot open file:\t" << PERFORMANCE_PATH <<"\n"; exit(1);}
+	fprintf(fp, "block\tdevice.time\ttransfer.time\thost.time\tsamples.per.second\tf.per.second\tprimitives.per.second\ttransfer.mb.per.second\n");
 	fclose(fp);
 	
 	// -----------------------------------------------------------------------
@@ -241,7 +240,7 @@ int main(int argc, char** argv)
 	// -----------------------------------------------------------------------
 	
 	time_t start_t, stop_t;
-	double secDEVICE, secHOST; // how long do we spend on each?
+	double secDEVICE, secHOST, secTRANSFER; // how long do we spend on each?
 	
 	for(int outer=0;outer<OUTER_BLOCKS+BURN_BLOCKS;outer++) {
 		
@@ -261,6 +260,10 @@ int main(int argc, char** argv)
 		// Retrieve result from device and store it in host array
 		cudaMemcpy(host_hypotheses, device_hypotheses, HYPOTHESIS_ARRAY_SIZE, cudaMemcpyDeviceToHost);
 		cudaMemcpy(host_out_MAPs,   device_out_MAPs,   HYPOTHESIS_ARRAY_SIZE, cudaMemcpyDeviceToHost);
+		time(&stop_t);
+		secTRANSFER = difftime(stop_t, start_t);
+		
+		time(&start_t);
 		
 		// sort them as required below
 		qsort( (void*)host_out_MAPs,   N, sizeof(hypothesis), hypothesis_posterior_compare);
@@ -342,8 +345,24 @@ int main(int argc, char** argv)
 		time(&stop_t);
 		secHOST = difftime(stop_t, start_t);
 		
-		FILE* fp = fopen(LOG_PATH.c_str(), "a");
-		fprintf(fp, "%i\t%.2f\t%.2f\t%.2f\n", outer, secHOST, secDEVICE, double(N*MCMC_ITERATIONS)/ (secHOST+secDEVICE) );
+		// -----------------------------------------------------------------------------------------------------
+		// output some performance stats
+		
+		double secTOTAL = secHOST + secTRANSFER + secHOST;
+		
+		unsigned long total_primitives = 0; // count up *approximately* how many primitives were evaluated
+		for(int i=0;i<N;i++) total_primitives += host_hypotheses[i].program_length;
+		
+		FILE* fp = fopen(PERFORMANCE_PATH.c_str(), "a");
+		fprintf(fp, "%i\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\n",
+			 outer, 
+	                 secDEVICE, 
+	                 secTRANSFER, 
+	                 secHOST, 
+	                 double(N*MCMC_ITERATIONS*__builtin_popcount(PROPOSAL))/ secTOTAL,
+			 double(N*MCMC_ITERATIONS*DLEN*__builtin_popcount(PROPOSAL))/secTOTAL,
+			 double(MCMC_ITERATIONS*__builtin_popcount(PROPOSAL)*DLEN*total_primitives)/secTOTAL, 
+			 double(sizeof(host_out_MAPs) + sizeof(host_hypotheses))/(1048576 * secTRANSFER)   );
 		fclose(fp);
 	}
 

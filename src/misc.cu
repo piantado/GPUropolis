@@ -1,6 +1,8 @@
 /*
-	Assorted functions 
-*/
+ * GPUropolis - 2013 Aug 30 - Steve Piantadosi 
+ * 
+ * Assorted misc functions
+ */
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // Some math

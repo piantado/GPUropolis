@@ -1,8 +1,9 @@
 /*
-
-	Kernel for running tree-regeneration MCMC on CUDA
-	 
-*/
+ * GPUropolis - 2013 Aug 30 - Steve Piantadosi 
+ *
+ * Kernel for running tree-regeneration MCMC on CUDA
+ * (insert/delete are not well debugged yet)
+ */
 
 // Kernel that executes on the CUDA device
 // initialize_sample here will make us resample if 1; else we use out_hypothesis as-is and propose form that

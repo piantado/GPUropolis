@@ -1,7 +1,8 @@
 /*
+ * GPUropolis - 2013 Aug 30 - Steve Piantadosi 
  * 
- * 
- */ 
+ * Virtual machine for interpreting programs on the device
+ */
 
 __device__ data_t f_output(data_t x, hypothesis* h, data_t* stack) {
 

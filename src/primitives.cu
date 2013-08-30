@@ -1,18 +1,15 @@
 /*
-
-	Definitions of primitive operations and constants, and an ENUM to keep track of them all
- 
-*/
+ * GPUropolis - 2013 Aug 30 - Steve Piantadosi 
+ * 
+ * FUTURE: THIS IS NOT IMPLEMENTED/USED YET
+ * Definitions of primitive operations and constants, and an ENUM to keep track of them all  
+ */
 
 // https://en.wikipedia.org/wiki/Physical_constant
 // C_ = 2.99792458e8; // m s^-1
 // G_ = 6.67384e-11; // M^3 kg^-1 s^-2
 // h_ = 6.62606957e-34; // plank's constant
 // 
-
-// Number theory: mod,etc, maybe have it work on ints
-// Physics: 
-// Mathematics
 
 // char* ALL_OPS[100];
 // OP[0]="ADD"; 

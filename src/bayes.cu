@@ -1,7 +1,8 @@
 /*
-	Simple Bayes functions on hypotheses 
-*/
-
+ * GPUropolis - 2013 Aug 30 - Steve Piantadosi 
+ * 
+ * Simple bayes functions on hypotheses
+ */
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // Hypothesis

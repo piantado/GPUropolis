@@ -1,7 +1,8 @@
 /*
-	Functions for manipulating arrays of hypotheses (on the host) 
-
-*/
+ * GPUropolis - 2013 Aug 30 - Steve Piantadosi 
+ * 
+ * Functions for manipulating hypotheses on the host
+ */
 
 int map_index(hypothesis* ar, int len, double prior_temperature, double likelihood_temperature) {
 	int idx;
