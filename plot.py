@@ -67,13 +67,17 @@ H2cnt = defaultdict(int)
 H2post = dict()
 H2f = dict()
 H2firstfound = dict() # When did we first find this hypotheiss?
+sn = -1 # what sample number are we on?
 for l in open(args['in'], 'r'):
 	if re.match("\s*#",l): continue
 	l = l.strip()
 	parts = re.split("\t", l)
 	
-	ismap, sn, n, rank, lp, prior, ll, h = parts[0], parts[1], parts[2], parts[3], parts[4], parts[5], parts[6], parts[-1]
+	rank, n, lp, prior, ll, h = parts[0], parts[1], parts[2], parts[3], parts[4], parts[-1]
 	lp = float(lp)
+	
+	# increment the sample number -- no longer is this reported explicitly
+	if rank==0: sn += 1
 	
 	# Fully skip these -- not just in plotting. If they are too terrible
 	if isnan(lp) or fullMaxLP-lp>FULL_TRIM_BELOW: continue

@@ -33,7 +33,6 @@ vector<datum>* load_data_file(const char* datapath, int FIRST_HALF_DATA, int EVE
 	vector<datum>* d = new vector<datum>();
 	char* line = NULL; size_t len=0; float x,y,sd; 
 	while( getline(&line, &len, fp) != -1) {
-		
 		if( line[0] == '#' ) continue;  // skip comments
 		else if (sscanf(line, "%f\t%f\t%f\n", &x, &y, &sd) == 3) { 
 			d->push_back( (datum){.input=(data_t)x, .output=(data_t)y, .sd=(data_t)sd} );

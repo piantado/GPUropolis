@@ -10,10 +10,10 @@ PROPOSAL=2
 EXEC=./gpumcmc
 
 # for WHICHHALF in '' --first-half; do
-for DATA in Boyle CLT Null Iris Iris-Function COBE PrimeCounting Zipf Constant Hubble Galileo BraheMars; do
+# for DATA in Boyle CLT Null Iris Iris-Function COBE PrimeCounting Zipf Constant Hubble Galileo BraheMars; do
 # for DATA in Hubble BraheMars ; do
 # for DATA in Iris Iris-Function COBE ; do
-# for DATA in Boyle; do
+for DATA in Hubble CLT PrimeCounting; do
 
 	echo Running $DATA !
 	
@@ -43,8 +43,9 @@ for DATA in Boyle CLT Null Iris Iris-Function COBE PrimeCounting Zipf Constant H
 	time /usr/bin/time --output=$OUT/time.txt $EXEC --proposal=$PROPOSAL --iterations=$ITERATIONS --in=data-sources/$DATA/data.txt --outer=$OUTER_BLOCKS --burn=$BURN_BLOCKS --N=$N > $OUT/raw_samples.txt
 	echo CUDA mcmc completed on $(date) >> $LOG
 	
-	# And a python post-processing script
-	nice -n 19 python plot.py --in=$OUT/raw_samples.txt --data=data-sources/$DATA/data.txt --out=$OUT &
+	# And a python post-processing script to do plotting.
+	# We'll do this on the tops
+	nice -n 19 python plot.py --in=$OUT/tops.txt --data=data-sources/$DATA/data.txt --out=$OUT &
 	echo Python completed on $(date) >> $LOG	
 
 # done
