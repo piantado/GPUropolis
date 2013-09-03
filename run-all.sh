@@ -40,7 +40,7 @@ for DATA in Hubble CLT PrimeCounting; do
 	
 	# run the CUDA MCMC; must use gnu time in order to output
 	# But here we also run time so it prints on command line too
-	time /usr/bin/time --output=$OUT/time.txt $EXEC --proposal=$PROPOSAL --iterations=$ITERATIONS --in=data-sources/$DATA/data.txt --outer=$OUTER_BLOCKS --burn=$BURN_BLOCKS --N=$N > $OUT/raw_samples.txt
+	time /usr/bin/time --output=$OUT/time.txt $EXEC --proposal=$PROPOSAL --iterations=$ITERATIONS --in=data-sources/$DATA/data.txt --outer=$OUTER_BLOCKS --burn=$BURN_BLOCKS --N=$N --out=$OUT
 	echo CUDA mcmc completed on $(date) >> $LOG
 	
 	# And a python post-processing script to do plotting.

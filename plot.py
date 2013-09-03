@@ -13,10 +13,10 @@ from collections import defaultdict
 import sympy
 from sympy import init_printing, Symbol, expand
 from sympy.parsing.sympy_parser import parse_expr
-
+ 
 from Shared import *
 
-parser = argparse.ArgumentParser(description='MCMC for Baboon data!')
+parser = argparse.ArgumentParser(description='Plots for GPUropolis!')
 parser.add_argument('--in', dest='in', type=str, default='o.txt', nargs="?", help='The input sample file')
 parser.add_argument('--data', dest='data', type=str, default='data.txt', nargs="?", help='The input data file')
 parser.add_argument('--out', dest='out', type=str, default='run', nargs="?", help='The output directory')
@@ -165,6 +165,9 @@ for method in ['lpZ', 'maxratio', 'count']:
 	plt.errorbar(xs, ys, yerr=sds, alpha=0.5, fmt=None, ecolor='red')	
 
 	plt.set_xlim( *smartrange(xs) )
+	
+	plt.set_xlabel("Time")
+	plt.set_ylabel("Distance")
 	
 	try:
 		plt.set_ylim( *smartrange(ys, sds=sds)  )
