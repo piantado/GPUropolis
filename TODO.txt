@@ -1,6 +1,6 @@
 
 TODO LIST:
-
+- FIX SORTING SO WE DON'T GET DUPLICATES -- SORT BY PROGRAM ITSELF, NOT POSTERIOR!!
  - Fix casting of data_t throughout f_output
  - Save the MCMC state and allow resuming
  - Debug and optimize insert/delete

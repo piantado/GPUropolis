@@ -78,6 +78,27 @@ int neghypothesis_posterior_compare(const void* a, const void* b) {
 	return -hypothesis_posterior_compare(a,b);
 }
 
+// sort so that we can remove duplicate hypotheses
+int sort_bestfirst_unique(const void* a, const void* b) {
+	int c = neghypothesis_posterior_compare(a,b);
+	
+	if(c != 0) return c;
+	else { // we must sort by the program (otherwise hyps with identical posteriors may not be removed as duplicates)
+		hypothesis* ah = (hypothesis*) a;
+		hypothesis* bh = (hypothesis*) b;
+		for(int i=hMAX_PROGRAM_LENGTH-1;i>0;i--){
+			op_t x = ah->program[i]; op_t y = bh->program[i];
+			if(x<y) return 1;
+			if(x>y) return -1;
+		}
+		
+	}
+	
+	return 0;
+}
+
+
+
 int hypothesis_structurally_identical( hypothesis* a, hypothesis* b) {
 	// check if two hypotheses are equal in terms of the program (ignoring constants and other params)
 	

@@ -1,6 +1,6 @@
  
 
-ITERATIONS=200000 ## About 1min for each 1k, for Zipf
+ITERATIONS=20000 #0    ## About 1min for each 1k, for Zipf
 BURN_BLOCKS=0 ## Don't need to burn if taking maps and sampling. 
 OUTER_BLOCKS=100 #00
 N=10240
@@ -13,7 +13,7 @@ EXEC=./gpumcmc
 # for DATA in Boyle CLT Null Iris Iris-Function COBE PrimeCounting Zipf Constant Hubble Galileo BraheMars; do
 # for DATA in Hubble BraheMars ; do
 # for DATA in Iris Iris-Function COBE ; do
-for DATA in Hubble CLT PrimeCounting; do
+for DATA in COBE; do
 
 	echo Running $DATA !
 	

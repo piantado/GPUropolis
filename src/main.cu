@@ -292,7 +292,7 @@ int main(int argc, char** argv)
 		// we maintain this by copying all of host_out_MAPs to the end, resorting, and removing duplicates
 		
 		memcpy( (void*)&host_top_hypotheses[NTOP], (void*)host_out_MAPs, HYPOTHESIS_ARRAY_SIZE); // put these at the end
- 		qsort(  (void*)host_top_hypotheses, NTOP+N, sizeof(hypothesis), neghypothesis_posterior_compare); // resort, best first
+ 		qsort(  (void*)host_top_hypotheses, NTOP+N, sizeof(hypothesis), sort_bestfirst_unique); // resort, best first, putting duplicate programs next to each other
 		
 		// and now delete duplicates
 		for(int i=0,j=0;i<NTOP;i++,j++) {
@@ -348,7 +348,7 @@ int main(int argc, char** argv)
 		// -----------------------------------------------------------------------------------------------------
 		// output some performance stats
 		
-		double secTOTAL = secHOST + secTRANSFER + secHOST;
+		double secTOTAL = secHOST + secTRANSFER + secDEVICE;
 		
 		unsigned long total_primitives = 0; // count up *approximately* how many primitives were evaluated
 		for(int i=0;i<N;i++) total_primitives += host_hypotheses[i].program_length;
@@ -359,10 +359,10 @@ int main(int argc, char** argv)
 	                 secDEVICE, 
 	                 secTRANSFER, 
 	                 secHOST, 
-	                 double(N*MCMC_ITERATIONS*__builtin_popcount(PROPOSAL))/ secTOTAL,
-			 double(N*MCMC_ITERATIONS*DLEN*__builtin_popcount(PROPOSAL))/secTOTAL,
-			 double(MCMC_ITERATIONS*__builtin_popcount(PROPOSAL)*DLEN*total_primitives)/secTOTAL, 
-			 double(sizeof(host_out_MAPs) + sizeof(host_hypotheses))/(1048576 * secTRANSFER)   );
+	                 double(N)*double(MCMC_ITERATIONS)*double(__builtin_popcount(PROPOSAL))/ secTOTAL,
+			 double(N)*double(MCMC_ITERATIONS)*double(DLEN)*double(__builtin_popcount(PROPOSAL))/secTOTAL,
+			 double(MCMC_ITERATIONS)*double(__builtin_popcount(PROPOSAL))*double(DLEN)*double(total_primitives)/secTOTAL, 
+			 double(sizeof(host_out_MAPs) + sizeof(host_hypotheses))/(1048576. * secTRANSFER)   );
 		fclose(fp);
 	}
 
