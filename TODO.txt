@@ -1,7 +1,22 @@
 
 TODO LIST:
-- FIX SORTING SO WE DON'T GET DUPLICATES -- SORT BY PROGRAM ITSELF, NOT POSTERIOR!!
+- Data:
+	- unsolved asymptotics in number theory?
+	- logistic map -- recover the equation, even when it looks like garbage
+	- density of squarefree integers ( 6 / pi^2 -- approximate a constant)
+	- 
+	
+- Make different languages -- trig, physical constants, number theory, etc 
+
+- functions: floor, abs, mod, sign
+
  - Fix casting of data_t throughout f_output
  - Save the MCMC state and allow resuming
  - Debug and optimize insert/delete
  - Migrate to using primitives.cu
+ - print out the maximum LL possible (based on SDs)
+ 
+ - What about another prior: 
+	- the depth of embedding of the variable should matter -- x+log(1) should be simpler than 1+log(x)
+	- so the probability of x-vs-1 should depend on depth. 
+	

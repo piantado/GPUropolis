@@ -1,0 +1,8 @@
+# Name, NumberOfArgs, Stack operation (in CUDA/C)
+ONE	0	1.0
+X	0	X
+NEG	1	-stack[top]
+ADD	2	__fadd_rz(stack[top], stack[top-1])
+SUB	2	__fadd_rz(stack[top], -stack[top-1])
+MUL	2	__fmul_rz(stack[top], stack[top-1])
+DIV	2	__fdiv_rz(stack[top], stack[top-1])

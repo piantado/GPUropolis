@@ -10,10 +10,8 @@ PROPOSAL=2
 EXEC=./gpumcmc
 
 # for WHICHHALF in '' --first-half; do
-# for DATA in Boyle CLT Null Iris Iris-Function COBE PrimeCounting Zipf Constant Hubble Galileo BraheMars; do
-# for DATA in Hubble BraheMars ; do
-# for DATA in Iris Iris-Function COBE ; do
-for DATA in COBE; do
+# for DATA in Boyle CLT Null Iris Iris-Function COBE PrimeCounting Zipf Constant Hubble Galileo BraheMars Stirling Shannon Sort; do
+for DATA in Stirling; do
 
 	echo Running $DATA !
 	
@@ -45,7 +43,7 @@ for DATA in COBE; do
 	
 	# And a python post-processing script to do plotting.
 	# We'll do this on the tops
-	nice -n 19 python plot.py --in=$OUT/tops.txt --data=data-sources/$DATA/data.txt --out=$OUT &
+# 	nice -n 19 python plot.py --in=$OUT/tops.txt --data=data-sources/$DATA/data.txt --out=$OUT &
 	echo Python completed on $(date) >> $LOG	
 
 # done

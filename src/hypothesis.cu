@@ -9,9 +9,9 @@
 // here all hypotheses are allocated the maximum amount of memory
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-const int     MAX_MAX_PROGRAM_LENGTH = 200; // the most this could ever be. 
-int              hMAX_PROGRAM_LENGTH = 25; // on the hostA
-__constant__ int dMAX_PROGRAM_LENGTH = 25; // on the device
+const int     MAX_MAX_PROGRAM_LENGTH = 100; // the most this could ever be. 
+int              hMAX_PROGRAM_LENGTH = 30; // on the hostA
+__constant__ int dMAX_PROGRAM_LENGTH = 30; // on the device
 
 // we must use a function to set the program length, because its used on local and global vars
 void set_MAX_PROGRAM_LENGTH(int v){
@@ -47,7 +47,6 @@ typedef struct hypothesis {
 
 // A standard initialization that sets this thing up!
 void initialize(hypothesis* h){
-// 	h->mutable_end = hMAX_PROGRAM_LENGTH-1;
 	h->posterior = -1.0/0.0;
 	h->prior = -1.0/0.0;
 	h->likelihood = 0.0;
@@ -60,7 +59,7 @@ void initialize(hypothesis* h){
 	
 	// zero the program
 	for(int i=0;i<hMAX_PROGRAM_LENGTH;i++)
-		h->program[i] = 0x0; 
+		h->program[i] = NOOP_; 
 }
 
 // so we qsort so best is LAST

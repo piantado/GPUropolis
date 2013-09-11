@@ -28,7 +28,10 @@ __device__ float compute_likelihood(int DLEN, datum* device_data, hypothesis* h,
 		ll += lnormalpdf(d, device_data[i].sd);
 	}
 	
- 	return ll / LL_TEMPERATURE;
+ 	h->likelihood = ll / LL_TEMPERATURE;
+	
+	return h->likelihood;
+	
 }
 
 
@@ -39,11 +42,15 @@ __device__ float compute_prior(hypothesis* h) {
 	
 	// We just use the proposal as a prior
 	// NOTE: This means compute_generation_probability MUST be called beforee compute_posterior
-	return  h->proposal_generation_lp / PRIOR_TEMPERATURE;
+// 	return  h->proposal_generation_lp / PRIOR_TEMPERATURE;
+	
+	h->prior = compute_x1depth_prior(h) / PRIOR_TEMPERATURE;
+	
+	return h->prior;
 }
 
 __device__ void compute_posterior(int DLEN, datum* device_data, hypothesis* h, float* stack) {
-	h->prior      = compute_prior(h);
-	h->likelihood = compute_likelihood(DLEN, device_data, h, stack);
+	compute_prior(h);
+	compute_likelihood(DLEN, device_data, h, stack);
 	h->posterior = h->prior + h->likelihood;
 }

@@ -38,7 +38,7 @@ for l in open(args['data'], 'r'):
 	l = l.strip()
 	if re.match("\s*#",l): continue
 	
-	x,y,sd = map(float, re.split("\t", l))
+	x,y,sd = map(float, re.split("\s", l))
 	
 	xs.append(x)
 	ys.append(y)
@@ -62,6 +62,7 @@ for l in open(args['in'], 'r'):
 	parts = re.split("\t", l)
 	lp = float(parts[4])
 	if lp>fullMaxLP: fullMaxLP = lp
+	
 
 H2cnt = defaultdict(int)
 H2post = dict()
@@ -83,6 +84,7 @@ for l in open(args['in'], 'r'):
 	if isnan(lp) or fullMaxLP-lp>FULL_TRIM_BELOW: continue
 	
 	h = re.sub("\"", "", h)
+	#print l
 	
 	if h not in H2cnt and not isnan(lp):
 		
@@ -96,6 +98,7 @@ for l in open(args['in'], 'r'):
 		except MemoryError:
 			H2f[h] = lambda x: float("nan")
 
+#print H2post.values()
 # sum up the posteriors
 Z = logsumexp([ x[0] for x in H2post.values() ]) 
 Zmax = max( [ x[0] for x in H2post.values() ])

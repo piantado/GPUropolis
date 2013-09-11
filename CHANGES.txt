@@ -1,3 +1,9 @@
+2013 Sep 10:
+	- Added make_primitives_header which allows different sets of primitives to be defined and built into the headers. This is a clumsy way to do it, but doing it with C macros seems to be a bit too much. This also involved moving computation of the prior (from expected length) into main.
+2012 Sep 7:
+	- Fixed bug so that tops *and* samples are stored so that we don't over-mix chains (and all find the same top)
+	- Added a prior that penalizes deep x (variable) values
+	- Changed prior and likelihood to set the h->prior and h->likelihood values inside, rather than in posterior
 
 2012 Sep 6:
 	- Fixed bug in sorting so that top really does not store duplicates (sorting by posterior is not enough since different expressions can have identical posteriors! This can give duplicates in the top list--as in PrimeCounting)

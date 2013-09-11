@@ -68,12 +68,10 @@ void dump_to_file(const char* path, hypothesis* ar, int N, int append) {
 		hypothesis* h = &ar[n];
 		fprintf(fp, "%d\t%d\t%.3f\t%.3f\t%.3f\t%.3f\t%d\t", n, h->chain_index, h->posterior,  h->prior, h->likelihood, h->acceptance_ratio, h->program_length);
 		
-		// print out the stack
-		/*
-		printf("\"");
-		for(int i=0;i<MAX_PROGRAM_LENGTH;i++) printf("%d ", h->program[i]);
-		printf("\"\t");
-		*/
+		// print out the program
+// 		fprintf(fp,"\"");
+// 		for(int i=0;i<hMAX_PROGRAM_LENGTH;i++) fprintf(fp, "%d ", h->program[i]);
+// 		fprintf(fp,"\"\t");		
 		
 		fprintf(fp, "\"");
 		print_program_as_expression(fp, h );

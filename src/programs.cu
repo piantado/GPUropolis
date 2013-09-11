@@ -4,44 +4,17 @@
  * Functions for programs. This includes primitives, but these will be migrated to primitives.cu 
  */
 
-// CONSTANTS, 2-ARY, 1-ARY
-// NUM_OPS stores the number of opsn
-// TODO: IF YOU CHANGE THESE, MYOU MSUT CHANGE THE CONDITION BELOW FOR DECODING WHAT HAPPENS TO THE TOP OF STACK
-/// NOOP must be first (=0) b/c we use that in the VM to keep thing from overrunning the stack
-// NOTE: Things slow down if we make these __constant__ since they are not accessed at the same time
-enum OPS                               { NOOP, X, ONE,      ADD, SUB, MUL, DIV, POW,    NEG, LOG, EXP, SIN, ASIN, NUM_OPS };
-__constant__ int NARGS[NUM_OPS]      = { 0,    0,   0,          2,   2,   2,   2,   2,      1,  1,  1,    1,     1}; // how many args for each op?
+// arrays to store the prior on the host and device
+const int MAX_NUM_OPS = 1000;
+float            hPRIOR[MAX_NUM_OPS]; 
+__device__ float dPRIOR[MAX_NUM_OPS];
 
-/*
- * The expected length satisfies:
- * E = pconst + p1arg(E+1) + p2arg(2 E + 1)
- * 
- * so
- * 
- * E = 1/(1-p1arg - 2 p2arg)
- * 
- * Constraining p1arg = p2arg,
- * 
- * E = 1/(1-3p1arg)
- * 
- * so
- * 
- * p1arg = p2arg = (1-1/E)/3
- */
-const float EXPECTED_LENGTH = 10.0; // how long should programs be in the prior? 
-const float PARG = (1.0-1.0/EXPECTED_LENGTH)/3.0; 
-const float px_ = (1.0 - 2.0*PARG)*1.0/11.0; // constrain that p1 = 10*px
-const float p1_ = (1.0 - 2.0*PARG)*10.0/11.0;
-const float p1arg_ = PARG / 5.0; // probability mass for EACH 1-arg element
-const float p2arg_ = PARG / 5.0; // probability mass for EACH 2-arg element
-
-__constant__ float prior[NUM_OPS]    = { 0.0, px_, p1_,  p2arg_, p2arg_,  p2arg_,  p2arg_,  p2arg_,     p1arg_,  p1arg_,  p1arg_,  p1arg_,  p1arg_ };
-__device__ float NUM_OPSf = float(NUM_OPS);
-__device__ int FIRST_1ARG = NEG; // NOTE: INSERT/DELETE requires this arrangement of: constant, 2arg, 1arg
-__device__ int FIRST_2ARG = ADD;
+// lower two bits give the number of arguments
+#define nargs(x) NARGS[x]
+#define stack_change(x) (1-nargs(x))
 
 // how much does each op change the stack?
-#define stack_change(x) (1-NARGS[x]) 
+// #define stack_change(x) (1-NARGS[x]) 
 
 // Choose an op from the prior distribution
 // NOTE: assumes prior on expansions is normalized
@@ -50,7 +23,7 @@ __device__ op_t random_op(int& x, int& y, int& z, int& w) {
 // 	op_t ret = 0;
 // 	int notdone = 1;
 // 	for(int i=0;i<NUM_OPS;i++) {
-// 		f = f-prior[i];
+// 		f = f-PRIOR[i];
 // 		ret = ret + i*(f<=0.0)*notdone;
 // 		notdone = (f>=0.0);
 // 	}
@@ -60,11 +33,11 @@ __device__ op_t random_op(int& x, int& y, int& z, int& w) {
 	// Version with breaks. Faster, apparently. 
 	float f = random_float(x,y,z,w);
 	for(int i=0;i<NUM_OPS;i++) {
-		f = f-prior[i];
+		f = f-dPRIOR[i];
 		if(f <= 0.0) return i;
 	}
 	assert(0); // should not get here
-	return NOOP;// to prevent warning
+	return NOOP_;// to prevent warning
 	
 }
 
@@ -181,7 +154,7 @@ __device__ void compute_length_and_proposal_generation_lp(hypothesis* h){
 		op_t pi = *pi_ptr;
 		
 		nopen  += stack_change(pi);
-		gp     += log(prior[pi]); // prior for this op
+		gp     += log(dPRIOR[pi]); // prior for this op
 		
 		if(nopen == 0) break;
 		pi_ptr--; // move to previous program value
@@ -209,7 +182,7 @@ __device__ void random_closed_expression(hypothesis* to, RNG_DEF) {
 			len++;
 		}
 		else {
-			to->program[i] = NOOP;
+			to->program[i] = NOOP_;
 		}
 	}
 	to->program_length = len;
@@ -230,22 +203,64 @@ __device__ int find_program_length(op_t* program) {
 }
 
 
+// DEFUNCT:
 // Compute the probability of generating this program according to the model!
-__device__ float compute_generation_probability(hypothesis* h) {
+// __device__ float compute_generation_probability(hypothesis* h) {
+// 	/*
+// 	// A version with uniform branching
+// 	float lprior = 0.0;
+// 	int close = find_program_close(h->program);
+// 	for(int i=0;i<dMAX_PROGRAM_LENGTH;i++) {
+// 		lprior     += (i>=close)*log(PRIOR[h->program[i]]); // prior for this op
+// 	}
+// 	return lprior;
+// 	/*/
+// 	// version that doesn't loop over the entire program
+// 	float lprior = 0.0;
+// 	int close = find_program_close(h->program);
+// 	for(int i=close;i<dMAX_PROGRAM_LENGTH;i++) {
+// 		lprior += log(PRIOR[h->program[i]]); // prior for this op
+// 	}
+// 	return lprior; // */
+// }
+
+__device__ float compute_x1depth_prior(hypothesis* h) {
 	/*
-	// A version with uniform branching
+	 * Same as generation probability, except that x-vs-1 depends on the depth such that
+	 * we prefer x in shallow depths.
+	 * 
+	 * This uses prior_stack to store the depths as we iterate through the program
+	 */
+	
+	int prior_stack[MAX_MAX_PROGRAM_LENGTH];
+	
 	float lprior = 0.0;
 	int close = find_program_close(h->program);
-	for(int i=0;i<dMAX_PROGRAM_LENGTH;i++) {
-		lprior     += (i>=close)*log(prior[h->program[i]]); // prior for this op
-	}
-	return lprior;
-	/*/
-	// version that doesn't loop over the entire program
-	float lprior = 0.0;
-	int close = find_program_close(h->program);
-	for(int i=close;i<dMAX_PROGRAM_LENGTH;i++) {
-		lprior += log(prior[h->program[i]]); // prior for this op
+	
+	int di = 1; // what depth are we at?
+	prior_stack[0] = 0;
+	
+	for(int i=dMAX_PROGRAM_LENGTH-1;i>=close;i--) { // start at the end so we measure depth correctly
+		op_t pi = h->program[i];
+		lprior += log(dPRIOR[pi]); // prior for this op
+		
+		// update our array keeping track of depth, and penalize if we should
+		switch( nargs(pi) ) {
+			case 0: 
+				di--;
+				lprior -= (pi == X_) * ( X_PENALTY + X_DEPTH_PENALTY * prior_stack[di] );
+				break;
+			case 1: 
+				prior_stack[di] = prior_stack[di-1]+1; // add one function, incrementing our count of functions
+				di++;
+				break;
+			case 2:
+				int v = prior_stack[di-1]+1; // add one function fo two arguments
+				prior_stack[di] = v;
+				prior_stack[di+1] = v;
+				di += 2;
+				break;
+		}
 	}
 	return lprior; // */
 }
@@ -273,27 +288,17 @@ void print_program_as_expression(FILE* fp, hypothesis* h) {
 		op_t op = h->program[p];
 		
 		switch(op) {
-// 			case ZERO: 
-// 				top += 1;
-// 				strcpy(SS[top], "0");
-// 				break;
-			case ONE: 
+			case NOOP_:
+				break;
+			case ONE_: 
 				top += 1;
 				strcpy(SS[top], "1.0");
 				break;
-			case X:
+			case X_:
 				top += 1;
 				strcpy(SS[top], "x");
 				break;
-// 			case PI:
-// 				top += 1;
-// 				strcpy(SS[top], "PI");
-// 				break;
-// 			case E:
-// 				top += 1;
-// 				strcpy(SS[top], "E");
-// 				break;
-			case ADD:
+			case ADD_:
 				strcpy(buf, "(");
 				strcat(buf, SS[top]);
 				strcat(buf, ")+(");
@@ -303,7 +308,7 @@ void print_program_as_expression(FILE* fp, hypothesis* h) {
 				strcpy(SS[top], buf);
 				break;
 				
-			case SUB:
+			case SUB_:
 				strcpy(buf, "(");
 				strcat(buf, SS[top]);
 				strcat(buf, ")-(");
@@ -313,7 +318,7 @@ void print_program_as_expression(FILE* fp, hypothesis* h) {
 				strcpy(SS[top], buf);
 				break;
 				
-			case MUL:
+			case MUL_:
 				strcpy(buf, "(");
 				strcat(buf, SS[top]);
 				strcat(buf, ")*(");
@@ -323,7 +328,7 @@ void print_program_as_expression(FILE* fp, hypothesis* h) {
 				strcpy(SS[top], buf);
 				break;
 				
-			case DIV:
+			case DIV_:
 				strcpy(buf, "(");
 				strcat(buf, SS[top]);
 				strcat(buf, ")/(");
@@ -332,54 +337,32 @@ void print_program_as_expression(FILE* fp, hypothesis* h) {
 				top -= 1;
 				strcpy(SS[top], buf);
 				break;
-			case POW:
-				strcpy(buf, "(");
+			case POW_:
+				strcpy(buf, "((");
 				strcat(buf, SS[top]);
 				strcat(buf, ")**(");
 				strcat(buf, SS[top-1]);
-				strcat(buf, ")");
+				strcat(buf, "))");
 				top -= 1;
 				strcpy(SS[top], buf);
 				break;	
-				
-			case LOG:
-				strcpy(buf, "log(");
-				strcat(buf, SS[top]);
-				strcat(buf, ")");
-				strcpy(SS[top], buf);
-				break;
-				
-			case EXP:
-				strcpy(buf, "exp(");
-				strcat(buf, SS[top]);
-				strcat(buf, ")");
-				strcpy(SS[top], buf);
-				break;
-			case SIN:
-				strcpy(buf, "sin(");
-				strcat(buf, SS[top]);
-				strcat(buf, ")");
-				strcpy(SS[top], buf);
-				break;
-			case ASIN:
-				strcpy(buf, "asin(");
-				strcat(buf, SS[top]);
-				strcat(buf, ")");
-				strcpy(SS[top], buf);
-				break;
-			case NEG:
+			case NEG_:
 				strcpy(buf, "-");
 				strcat(buf, SS[top]);
 				strcat(buf, "");
 				strcpy(SS[top], buf);
-				break;	
-// 			case TAN:
-// 				strcpy(buf, "tan(");
-// 				strcat(buf, SS[top]);
-// 				strcat(buf, ")");
-// 				strcpy(SS[top], buf);
-// 				break;
-// 				
+				break;
+			default: // Defaultly just use the name
+				strcpy(buf, NAMES[op]);
+				strcat(buf, "(");
+				strcat(buf, SS[top]);
+				for(int k=1;k<hNARGS[op];k++) { // append on all the arguments
+					strcat(buf, ",");
+					strcat(buf, SS[top-k]);
+				}
+				strcat(buf, ")");
+				strcpy(SS[top], buf);
+				break;
 		}
 	}
 	
@@ -387,133 +370,3 @@ void print_program_as_expression(FILE* fp, hypothesis* h) {
 }
 
 
-
-// void print_program_as_expression(hypothesis* h) {
-// 	/*
-// 	 * Print things nicely on displays.
-// 	 */
-// 	
-// 	char buf[MAX_PROGRAM_LENGTH*MAX_PROGRAM_LENGTH];
-// 	
-// 	int top = MAX_PROGRAM_LENGTH; // top of the stack
-// 	
-// 	// re-initialize our buffer
-// 	for(int r=0;r<MAX_PROGRAM_LENGTH*2;r++) strcpy(SS[r], "0"); // since everything initializes to 0
-// 	
-// 	for(int p=0;p<MAX_PROGRAM_LENGTH;p++) {
-// 		int op = h->program[p];
-// 		
-// 		switch(op) {
-// // 			case ZERO: 
-// // 				top += 1;
-// // 				strcpy(SS[top], "0");
-// // 				break;
-// 			case ONE: 
-// 				top += 1;
-// 				strcpy(SS[top], "1.0");
-// 				break;
-// 			case X:
-// 				top += 1;
-// 				strcpy(SS[top], "x");
-// 				break;
-// // 			case PI:
-// // 				top += 1;
-// // 				strcpy(SS[top], "PI");
-// // 				break;
-// // 			case E:
-// // 				top += 1;
-// // 				strcpy(SS[top], "E");
-// // 				break;
-// 			case ADD:
-// 				strcpy(buf, "add(");
-// 				strcat(buf, SS[top]);
-// 				strcat(buf, ",");
-// 				strcat(buf, SS[top-1]);
-// 				strcat(buf, ")");
-// 				top -= 1;
-// 				strcpy(SS[top], buf);
-// 				break;
-// 				
-// 			case SUB:
-// 				strcpy(buf, "sub(");
-// 				strcat(buf, SS[top]);
-// 				strcat(buf, ",");
-// 				strcat(buf, SS[top-1]);
-// 				strcat(buf, ")");
-// 				top -= 1;
-// 				strcpy(SS[top], buf);
-// 				break;
-// 				
-// 			case MUL:
-// 				strcpy(buf, "mul(");
-// 				strcat(buf, SS[top]);
-// 				strcat(buf, ",");
-// 				strcat(buf, SS[top-1]);
-// 				strcat(buf, ")");
-// 				top -= 1;
-// 				strcpy(SS[top], buf);
-// 				break;
-// 				
-// 			case DIV:
-// 				strcpy(buf, "div(");
-// 				strcat(buf, SS[top]);
-// 				strcat(buf, ",");
-// 				strcat(buf, SS[top-1]);
-// 				strcat(buf, ")");
-// 				top -= 1;
-// 				strcpy(SS[top], buf);
-// 				break;
-// 			case POW:
-// 				strcpy(buf, "pow(");
-// 				strcat(buf, SS[top]);
-// 				strcat(buf, ",");
-// 				strcat(buf, SS[top-1]);
-// 				strcat(buf, ")");
-// 				top -= 1;
-// 				strcpy(SS[top], buf);
-// 				break;	
-// 				
-// 			case LOG:
-// 				strcpy(buf, "log(");
-// 				strcat(buf, SS[top]);
-// 				strcat(buf, ")");
-// 				strcpy(SS[top], buf);
-// 				break;
-// 				
-// 			case EXP:
-// 				strcpy(buf, "exp(");
-// 				strcat(buf, SS[top]);
-// 				strcat(buf, ")");
-// 				strcpy(SS[top], buf);
-// 				break;
-// 			case SIN:
-// 				strcpy(buf, "sin(");
-// 				strcat(buf, SS[top]);
-// 				strcat(buf, ")");
-// 				strcpy(SS[top], buf);
-// 				break;
-// 			case ASIN:
-// 				strcpy(buf, "asin(");
-// 				strcat(buf, SS[top]);
-// 				strcat(buf, ")");
-// 				strcpy(SS[top], buf);
-// 				break;
-// 			case NEG:
-// 				strcpy(buf, "-");
-// 				strcat(buf, SS[top]);
-// 				strcat(buf, "");
-// 				strcpy(SS[top], buf);
-// 				break;	
-// // 			case TAN:
-// // 				strcpy(buf, "tan(");
-// // 				strcat(buf, SS[top]);
-// // 				strcat(buf, ")");
-// // 				strcpy(SS[top], buf);
-// // 				break;
-// // 				
-// 		}
-// 	}
-// 	
-// 	printf("%s", SS[top]);
-// }
-// 

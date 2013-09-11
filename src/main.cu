@@ -18,10 +18,17 @@ const float PRIOR_TEMPERATURE = 1.0; // the prior temperature
 const float LL_TEMPERATURE = 1.0; // the temperature on the likelihood
 float POSTERIOR_TEMPERATURE = 1.0;
 
+const float X_DEPTH_PENALTY = 0.0; // extra penalty for X depth. 0 here gives PCFG generation probability prior
+const float X_PENALTY = 0.0; // penalty for using X
+
+const float EXPECTED_LENGTH = 10.0;
+const float PRIOR_XtoCONSTANT = 0.1; //what proportion of constant proposals are x (as opposed to all other constants)?
+
 const double RESAMPLE_PRIOR_TEMPERATURE = 1000.0; // when we resample, what temperatures do we use?
 const double RESAMPLE_LIKELIHOOD_TEMPERATURE = 1000.0; 
 
 #include "src/misc.cu"
+#include "src/__PRIMITIVES.cu"
 #include "src/data.cu"
 #include "src/hypothesis.cu"
 #include "src/programs.cu"
@@ -32,7 +39,8 @@ const double RESAMPLE_LIKELIHOOD_TEMPERATURE = 1000.0;
 
 using namespace std;
 
-int N = 1024*2;  // Hw many chains?
+int N = 1024;  // Hw many chains?
+int NTOP = 5000; // store this many of the "top" hypotheses (for resampling).
 
 const int BLOCK_SIZE = 256; // WOW 16 appears to be fastest here...
 int N_BLOCKS = 0; // set below
@@ -51,8 +59,6 @@ int EVEN_HALF_DATA  = 0; // use only the even half of the data
 
 int PROPOSAL = 0x2; // a binary sum code for each type of proposal: 1: from prior, 2: standard tree-generation, 4: insert/delete moves (both)
 
-// NO LONGER IMPLEMENTED: int PRINT_TOP = -1; // if -1 we print all, otherwise we print the top this many from each outer-loop
-
 int MAIN_LOOP = 2; // an integer code for 
 /* 
  * 1: start anew each outer loop (restart from prior)
@@ -68,7 +74,6 @@ int MAIN_LOOP = 2; // an integer code for
 // double RESAMPLE_IF_LOWER = 1000.0; // if we are this much lower than the max, we will be resampled from the top. 
 */
 
-int NTOP = 5000; // store this many of the "top" hypotheses (for resampling). TODO: RIGHT NOW, THIS MUST BE LOWER THAN N DUE TO LACK OF CHECKS BELOW
 
 static struct option long_options[] =
 	{	
@@ -198,7 +203,67 @@ int main(int argc, char** argv)
 	datum* device_data; 
 	cudaMalloc((void **) &device_data, DATA_BYTE_LEN);
 	cudaMemcpy(device_data, host_data, DATA_BYTE_LEN, cudaMemcpyHostToDevice);
+		
+	// -----------------------------------------------------------------------
+	// Set up the prior
+	// -----------------------------------------------------------------------
 	
+	assert(NUM_OPS < MAX_NUM_OPS);  // check that we don't have too many for our array
+
+	
+	// how many times have we seen each number of args?
+	int count_args[] = {0,0,0};
+	for(int i=1;i<NUM_OPS;i++){  // skip NOOP
+		assert( hNARGS[i] <= 2); // we must have this to compute expected lengths correctly. It can be changed for arbitrary-arity later
+		count_args[ hNARGS[i]]++; 
+	}
+		
+	/*
+	* The expected length satisfies:
+	* E = p0arg + p1arg(E+1) + p2arg(2 E + 1)
+	* E = p0arg+p1arg+p2arg + E ( p1arg + 2 p2arg)
+	* E = 1 + E (p1arg + 2 p2arg)
+	* 1 = E (1-p1arg-p2arg)
+	* so
+	* E = 1/(1-p1arg - 2 p2arg)
+	* 
+	* Constraining p1arg = p2arg,
+	* E = 1/(1-3p1arg)
+	* 
+	* so
+	* 
+	* p1arg = p2arg = (1-1/E)/3
+	* and then we must account for the number in each class
+	*/
+	float P = (1.0-1.0/EXPECTED_LENGTH)/3.0;
+	float P_0arg = (1.0-2.0*P);
+	float P_X        = P_0arg * PRIOR_XtoCONSTANT;
+	float P_CONSTANT = P_0arg * (1.0-PRIOR_XtoCONSTANT) / float(count_args[0]-1);
+	float P_1arg  = P / float(count_args[1]);
+	float P_2arg  = P / float(count_args[2]);
+		
+	for(int i=0;i<MAX_NUM_OPS;i++) hPRIOR[i] = 0.0; // must initialize since not all will be used
+	
+	for(int i=0;i<NUM_OPS;i++) {
+		if( i == NOOP_ )         { hPRIOR[i] = 0.0; }
+		else if( i == X_ )       { hPRIOR[i] = P_X; }
+		else if( hNARGS[i] == 0) { hPRIOR[i] = P_CONSTANT; }
+		else if( hNARGS[i] == 1) { hPRIOR[i] = P_1arg; }
+		else if( hNARGS[i] == 2) { hPRIOR[i] = P_2arg; }	
+	}
+
+	// normalize the prior
+	double priorZ = 0.0;
+	for(int i=0;i<NUM_OPS;i++) priorZ += hPRIOR[i];
+	for(int i=0;i<NUM_OPS;i++) hPRIOR[i] /= priorZ;
+
+	// and copy PRIOR over to the device
+	cudaGetErrorString(cudaMemcpyToSymbol(dPRIOR, hPRIOR, MAX_NUM_OPS*sizeof(float), 0, cudaMemcpyHostToDevice));
+	
+	// Echo the prior
+// 	for(int i=0;i<NUM_OPS;i++) cerr << i << "  " << NAMES[i] << " -->" << hPRIOR[i] << endl;
+// 	return;
+
 	// -----------------------------------------------------------------------
 	// Set up some bits...
 	// -----------------------------------------------------------------------
@@ -225,8 +290,8 @@ int main(int argc, char** argv)
 	}
 
 	// store the top hypotheses overall
-	hypothesis* host_top_hypotheses = new hypothesis[NTOP+N]; // store N so that we can push N on the end, sort, and then remove duplicates
-	for(int i=0;i<NTOP+N;i++) initialize(&host_top_hypotheses[i]);
+	hypothesis* host_top_hypotheses = new hypothesis[NTOP+2*N]; // store NTOP plus 2N so we can store the sampesl and tops on the end, then remove duplicates
+	for(int i=0;i<NTOP+2*N;i++) initialize(&host_top_hypotheses[i]);
 	
 	// a special guy we keep  empty
 	hypothesis blankhyp; 
@@ -292,13 +357,14 @@ int main(int argc, char** argv)
 		// we maintain this by copying all of host_out_MAPs to the end, resorting, and removing duplicates
 		
 		memcpy( (void*)&host_top_hypotheses[NTOP], (void*)host_out_MAPs, HYPOTHESIS_ARRAY_SIZE); // put these at the end
- 		qsort(  (void*)host_top_hypotheses, NTOP+N, sizeof(hypothesis), sort_bestfirst_unique); // resort, best first, putting duplicate programs next to each other
+		memcpy( (void*)&host_top_hypotheses[NTOP+N], (void*)host_hypotheses, HYPOTHESIS_ARRAY_SIZE); // put these at the end
+ 		qsort(  (void*)host_top_hypotheses, NTOP+2*N, sizeof(hypothesis), sort_bestfirst_unique); // resort, best first, putting duplicate programs next to each other
 		
 		// and now delete duplicates
 		for(int i=0,j=0;i<NTOP;i++,j++) {
-			if(j<NTOP+N) {
+			if(j<NTOP+2*N) {
 				// skip forward over everything identical
-				while(j+1 < NTOP+N && hypothesis_structurally_identical(&host_top_hypotheses[j], &host_top_hypotheses[j+1]))
+				while(j+1 < NTOP+2*N && hypothesis_structurally_identical(&host_top_hypotheses[j], &host_top_hypotheses[j+1]))
 					j++;
 				
 				if(j!=i) memcpy( (void*)&host_top_hypotheses[i], &host_top_hypotheses[j], sizeof(hypothesis));

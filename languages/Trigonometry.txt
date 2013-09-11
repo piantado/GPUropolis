@@ -1,0 +1,7 @@
+# Name, NumberOfArgs, Stack operation (in CUDA/C)
+SIN	1	__sinf(stack[top])
+ASIN	1	asinf(stack[top])
+COS	1	__cosf(stack[top])
+ACOS	1	acosf(stack[top])
+TAN	1	__tanf(stack[top])
+ATAN	1	atanf(stack[top])
