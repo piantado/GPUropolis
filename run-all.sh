@@ -1,6 +1,6 @@
  
 
-ITERATIONS=2000 # K20: 10000 #200000   ## About 1min for each 1k, for Zipf
+ITERATIONS=20000 # K20: 10000 #200000   ## About 1min for each 1k, for Zipf
 BURN_BLOCKS=0 ## Don't need to burn if taking maps and sampling. 
 OUTER_BLOCKS=10 #00
 N=65536 #131072 # 131072 # 128*1024

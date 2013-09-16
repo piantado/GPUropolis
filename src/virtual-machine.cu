@@ -15,7 +15,7 @@ __device__ data_t f_output(data_t X, hypothesis* h, data_t* stack) {
 	for(int p=program_start;p<dMAX_PROGRAM_LENGTH;p++) { // program pointer
 		op_t op = (*pi_ptr);
 		
-		int newtop = top +  stack_change(op);
+		int newtop = top + stack_change(op);
 		
 		// If top is out of range, this makes it a NOOP if we go out of range, preventing us from having to initialize the stack
 		op = op*(top>=0)*(newtop>=0)*(top<dMAX_PROGRAM_LENGTH)*(newtop<dMAX_PROGRAM_LENGTH);

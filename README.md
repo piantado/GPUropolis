@@ -29,3 +29,10 @@ At the end of each block, the sampler can do one of several things (as given by 
 * 4: resample from the global top hypotheses (also using  RESAMPLE_PRIOR_TEMPERATURE/ RESAMPLE_LIKELIHOOD_TEMPERATURE)
 
 There is also an experimental search kernel, and a simple one to sample from the prior. 
+
+Languages:
+----------
+
+There are several possible languages specifying primitives and functions. All correspond to grammars with only one nonterminal type (EXPR). The languages can be changed via make_primitives_header.py, which outputs src/__PRIMITIVES.cu and src/__VM_INCLUDE.cu, giving the primitives and prior, and virtual machine instructions, respectively. make_primitives_header.py takes command line arguments of any of the files in languages. languages/Polynomial.txt should always be included. 
+
+These files have the format of columns for: name, number of arguments (0 for constants), stack operation. The stack operation is substituted into __VM_INCLUDE.cu and is C code that gives what should be put on top of the stack (see __VM_INCLUDE.cu for examples of how these are translated).
