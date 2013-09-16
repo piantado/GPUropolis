@@ -289,7 +289,6 @@ int main(int argc, char** argv)
 	hypothesis* host_out_MAPs = new hypothesis[N];
 	hypothesis* device_out_MAPs; cudaMalloc((void **) &device_out_MAPs, HYPOTHESIS_ARRAY_SIZE); // device allocate
 	
-
 	// -----------------------------------------------------------------------
 	// Initialize our hypotheses
 	// -----------------------------------------------------------------------
@@ -327,8 +326,13 @@ int main(int argc, char** argv)
 		// -----------------------------------------------------------------------------------------------------
 		// Run
 		
+		
+		// decide on the LL temperature we'll run on
+		double thetemp = PERFECT_LL;
+		if(outer > 0 and is_valid(host_top_hypotheses[0].likelihood) ) thetemp = host_top_hypotheses[0].likelihood;
+		
 		mytimer = clock();
-		MH_kernel<<<N_BLOCKS,BLOCK_SIZE>>>(N, PROPOSAL, MCMC_ITERATIONS, PERFECT_LL, DLEN, device_data, device_hypotheses, device_out_MAPs, seed+N*outer,  (outer==0)||(END_OF_BLOCK_ACTION==1) );
+		MH_kernel<<<N_BLOCKS,BLOCK_SIZE>>>(N, PROPOSAL, MCMC_ITERATIONS, thetemp, DLEN, device_data, device_hypotheses, device_out_MAPs, seed+N*outer,  (outer==0)||(END_OF_BLOCK_ACTION==1) );
 		cudaDeviceSynchronize(); // wait for preceedings requests to finish
 		secDEVICE = double(clock() - mytimer) / CLOCKS_PER_SEC;
 		
@@ -429,7 +433,7 @@ int main(int argc, char** argv)
 		for(int i=0;i<N;i++) total_primitives += host_hypotheses[i].program_length;
 		
 		FILE* fp = fopen(PERFORMANCE_PATH.c_str(), "a");
-		fprintf(fp, "%i\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\n",
+		fprintf(fp, "%i\t%.2f\t%.2f\t%.6f\t%.6f\t%.6f\t%.2f\t%.2f\t%.2f\t%.2f\n",
 			outer, 
 			PERFECT_LL,
 			host_top_hypotheses[0].likelihood, 
@@ -439,7 +443,7 @@ int main(int argc, char** argv)
 			double(N)*double(MCMC_ITERATIONS)*double(__builtin_popcount(PROPOSAL))/ secTOTAL,
 			double(N)*double(MCMC_ITERATIONS)*double(DLEN)*double(__builtin_popcount(PROPOSAL))/secTOTAL,
 			double(MCMC_ITERATIONS)*double(__builtin_popcount(PROPOSAL))*double(DLEN)*double(total_primitives)/secTOTAL, 
-			double(sizeof(host_out_MAPs) + sizeof(host_hypotheses))/(1048576. * secTRANSFER)   );
+			double(HYPOTHESIS_ARRAY_SIZE*2)/(1048576. * secTRANSFER)   );
 		fclose(fp);
 	}
 

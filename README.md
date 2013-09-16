@@ -6,6 +6,8 @@ GPUropolis is software for using CUDA to run MCMC on compositional spaces. At pr
 
 GPUropolis is under heavy development by colala, the computation and language lab at the University of Rochester. Constact Steve Piantadosi (spiantadosi@bcs.rochester.edu) for questions. 
 
+Distributed under GPL3.
+
 Input/output:
 ------------
 A standard run produces several files:
@@ -18,7 +20,7 @@ A standard run produces several files:
 Current sampling schemes:
 ------------------------
 	
-MH_kernel stats at a temperature given by the maximum likelihood possible (given the input SDs). It anneals down to 1.0 using half of the MCMC_ITERATIONS and runs at 1.0 for the second half. This is called one "block" of samples. The sampler will run for OUTER_BLOCKS number of blocks, with BURN_BLOCKS before (data is not saved from BURN_BLOCKS). 
+MH_kernel stats at a temperature given by the maximum likelihood found so far (using the max possible for iteration 0). It anneals down to 1.0 using half of the MCMC_ITERATIONS and runs at 1.0 for the second half. This is called one "block" of samples. The sampler will run for OUTER_BLOCKS number of blocks, with BURN_BLOCKS before (data is not saved from BURN_BLOCKS). 
 
 At the end of each block, the sampler can do one of several things (as given by END_OF_BLOCK_ACTION): 
 * 1: start anew each outer loop (restart from prior)
