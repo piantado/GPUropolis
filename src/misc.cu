@@ -8,7 +8,9 @@
 // Some math
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-__constant__ const float PIf = 3.141592653589;
+
+// use a define so we can work on host and device
+#define PIf 3.141592653589
 
 // Check if something is not a nan or inf
 #define is_valid(x) (!(isnan(x) || isinf(x)))
@@ -77,7 +79,7 @@ __device__ __host__ float lexponentialpdf(float x, float r) {
 }
 
 __device__ __host__ float lnormalpdf( float x, float s ){
-	return -(x*x)/(2.0*s*s) - 0.5 * log(2.0*PIf*s*s);
+	return -(x*x)/(2.0*s*s) - 0.5 * (log(2.0*PIf) + 2.0*log(s));
 }
 
 // log  log-normal

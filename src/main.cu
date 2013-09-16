@@ -199,9 +199,9 @@ int main(int argc, char** argv)
 
 	// compute the maximum possible ll
 	// we use this for the start of annealing temperature
-	float PERFECT_LL = 0.0;
-	for(int di=0;di<DLEN;di++) { PERFECT_LL += lnormalpdf( 0.0, host_data[di].sd); }	
-
+	double PERFECT_LL = 0.0;
+	for(int di=0;di<DLEN;di++) {PERFECT_LL += lnormalpdf( 0.0, host_data[di].sd); }
+	
 	// Echo the run data if we want:
 // 	for(int i=0;i<DLEN;i++)	printf("# %4.4f\t%4.4f\t%4.4f\n", host_data[i].input, host_data[i].output, host_data[i].sd);
 	
