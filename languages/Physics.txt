@@ -1,0 +1,20 @@
+# Name, NumberOfArgs, Stack operation (in CUDA/C)
+# Constants from wikipedia: using only the non-derived ones
+## TODO: Check how precision works for these...
+C	0	299792458
+G	0	6.67384e-11
+h	0	6.62606957e-34
+# Magnetic constant:
+u0	0	1.256637061e-6
+# Electric constant:"
+e_e	0	1.602176565e-19
+# electron, proton mass:
+m_e	0	9.10938291e-31
+m_p	0	1.672621777e-27
+# Avogadro's cosntant
+A	0	6.02214129e23
+# Gas constant
+R	0	8.3144621
+# Boltzman is derived from A,R
+Pi	0	3.14159265358979
+E	0	2.71828182845904523536

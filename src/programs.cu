@@ -354,15 +354,21 @@ void print_program_as_expression(FILE* fp, hypothesis* h) {
 				break;
 			default: // Defaultly just use the name
 				strcpy(buf, NAMES[op]);
-				strcat(buf, "(");
-				strcat(buf, SS[top]);
-				for(int k=1;k<hNARGS[op];k++) { // append on all the arguments
-					strcat(buf, ",");
-					strcat(buf, SS[top-k]);
+				if(hNARGS[op]>=1){
+					strcat(buf, "(");
+					strcat(buf, SS[top]);
+					for(int k=1;k<hNARGS[op];k++) { // append on all the arguments
+						strcat(buf, ",");
+						strcat(buf, SS[top-k]);
+					}
+					strcat(buf, ")");
 				}
-				strcat(buf, ")");
+				else { // if we are a constant, stack increases
+					top++;
+				}
 				strcpy(SS[top], buf);
 				break;
+				
 		}
 	}
 	

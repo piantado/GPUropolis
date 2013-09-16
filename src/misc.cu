@@ -18,13 +18,6 @@ __constant__ const float PIf = 3.141592653589;
 #define nlogf(x) (-log(float(x)))
 #define logf(x)  log(float(x))
 
-// So we can use our own code in debugging
-__device__ float mul(float x, float y) { return x*y; }
-__device__ float div(float x, float y) { return x/y; }
-__device__ float add(float x, float y) { return x+y; }
-__device__ float sub(float x, float y) { return x-y; }
-
-
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // Functions for avoiding branching. Most of these are just slow
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -32,19 +25,8 @@ __device__ float sub(float x, float y) { return x-y; }
 // this is our arithmetic if/then macro
 #define ifthen(x,y,z) ((y)*(x) + (z)*(1-(x)))
 
-// swap two pointers conditionally, without branching
-__device__ void ifthenswap(int Q, void** x, void** y, void** tmp) {
-	int i = int(Q>0);
-	tmp[0] = *x;
-	tmp[1] = *y;
-	void* t1 = tmp[i];
-	void* t2 = tmp[1-i];
-	(*x) = t1;
-	(*y) = t2;
-}
-
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-// Random number generation and stats
+// Random number generation 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 // And some macros to help with random numbers, so we can concisely pass these around functions etc
@@ -74,14 +56,6 @@ __device__ float random_exponential(float r, RNG_DEF) {
 	return -log(random_float(RNG_ARGS))/r;
 }
 
-__device__ float lexponentialpdf(float x, float r) {
-	return log(r) - r*x;
-}
-
-__device__ float lnormalpdf( float x, float s ){
-	return -(x*x)/(2.0*s*s) - 0.5 * log(2.0*PIf*s*s);
-}
-
 // Generate a 0-mean random deviate with mean 0, sd 1
 // This uses Box-muller so we don't need branching
 __device__ float random_normal(int& x, int& y, int& z, int& w) {
@@ -94,8 +68,20 @@ __device__ float random_lnormal(float u, float s, int& x, int& y, int& z, int& w
 	return exp(u+s*random_normal(x,y,z,w));
 }
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// Statistical functions
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+__device__ __host__ float lexponentialpdf(float x, float r) {
+	return log(r) - r*x;
+}
+
+__device__ __host__ float lnormalpdf( float x, float s ){
+	return -(x*x)/(2.0*s*s) - 0.5 * log(2.0*PIf*s*s);
+}
+
 // log  log-normal
-__device__ float llnormalpdf(float x, float s) {
+__device__ __host__ float llnormalpdf(float x, float s) {
 	return lnormalpdf( log(x), s) - log(x);
 }
 

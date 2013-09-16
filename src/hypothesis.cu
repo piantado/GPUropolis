@@ -10,8 +10,8 @@
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 const int     MAX_MAX_PROGRAM_LENGTH = 100; // the most this could ever be. 
-int              hMAX_PROGRAM_LENGTH = 30; // on the hostA
-__constant__ int dMAX_PROGRAM_LENGTH = 30; // on the device
+int              hMAX_PROGRAM_LENGTH = 25; // on the hostA
+__constant__ int dMAX_PROGRAM_LENGTH = 25; // on the device
 
 // we must use a function to set the program length, because its used on local and global vars
 void set_MAX_PROGRAM_LENGTH(int v){
@@ -27,7 +27,11 @@ void set_MAX_PROGRAM_LENGTH(int v){
 // what type is the program?
 typedef char op_t;
 
+#define CHECK_BIT 33
+
 // A struct for storing a hypothesis, which is a program and some accoutrements
+// the check variables are there to make sure we don't overrun anything in any program editing
+// main.cu has assertions to check they have CHECK_BIT value
 typedef struct hypothesis {
 	float prior;
 	float likelihood;
@@ -55,7 +59,7 @@ void initialize(hypothesis* h){
 	h->acceptance_ratio = 0.0;
 
 	// Set some check bits to catch buffer overruns. If any change, we have a problem!
-	h->check0 = 33;	h->check1 = 33;	h->check2 = 33;	h->check3 = 33;
+	h->check0 = CHECK_BIT;	h->check1 = CHECK_BIT;	h->check2 = CHECK_BIT;	h->check3 = CHECK_BIT;
 	
 	// zero the program
 	for(int i=0;i<hMAX_PROGRAM_LENGTH;i++)

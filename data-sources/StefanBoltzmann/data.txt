@@ -1,0 +1,5 @@
+# Derive Stefan-Boltzmann from other physical constants:
+# http://en.wikipedia.org/wiki/Stefan%E2%80%93Boltzmann_law
+# Here we fix x=1 so that we essentially give that prior mass to 1
+# Error is invented to be the precision here
+1	5.670400e-8 1e-14

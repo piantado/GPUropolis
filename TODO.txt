@@ -1,22 +1,20 @@
 
 TODO LIST:
-- Data:
-	- unsolved asymptotics in number theory?
-	- logistic map -- recover the equation, even when it looks like garbage
-	- density of squarefree integers ( 6 / pi^2 -- approximate a constant)
-	- 
+
+
+	- Have a better scheme for temperatures, schedules, resampling and things!
 	
-- Make different languages -- trig, physical constants, number theory, etc 
+	- Hmm the Boyle data doesn't seem to be right...
+	- Or the COBE -- are these units right?
+	
+	- Data:
+		- unsolved asymptotics in number theory?
+		- logistic map -- recover the equation, even when it looks like garbage
+		- http://en.wikipedia.org/wiki/Ives%E2%80%93Stilwell_experiment
 
-- functions: floor, abs, mod, sign
+	- Save the MCMC state and allow resuming
+	- Debug and optimize insert/delete
+	- print out the maximum LL possible (based on SDs)
+	
 
- - Fix casting of data_t throughout f_output
- - Save the MCMC state and allow resuming
- - Debug and optimize insert/delete
- - Migrate to using primitives.cu
- - print out the maximum LL possible (based on SDs)
- 
- - What about another prior: 
-	- the depth of embedding of the variable should matter -- x+log(1) should be simpler than 1+log(x)
-	- so the probability of x-vs-1 should depend on depth. 
 	

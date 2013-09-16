@@ -1,4 +1,4 @@
 # Name, NumberOfArgs, Stack operation (in CUDA/C)
 LOG	1	__logf(stack[top])
 EXP	1	__expf(stack[top])
-POW	2	__powf(stack[top], stack[top-1])
+

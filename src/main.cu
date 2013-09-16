@@ -16,11 +16,13 @@
 
 const float PRIOR_TEMPERATURE = 1.0; // the prior temperature
 const float LL_TEMPERATURE = 1.0; // the temperature on the likelihood
-float POSTERIOR_TEMPERATURE = 1.0;
 
-const float X_DEPTH_PENALTY = 0.0; // extra penalty for X depth. 0 here gives PCFG generation probability prior
-const float X_PENALTY = 0.0; // penalty for using X
+const float X_DEPTH_PENALTY = 10.0; // extra penalty for X depth. 0 here gives PCFG generation probability prior
+const float X_PENALTY = 10.0; // penalty for using X
 
+// Specification of the prior
+// in tree resampling, the expected length here is important in getting a good acceptance rate -- too low
+// (meaning too long) and we will reject almost everything
 const float EXPECTED_LENGTH = 10.0;
 const float PRIOR_XtoCONSTANT = 0.1; //what proportion of constant proposals are x (as opposed to all other constants)?
 
@@ -34,15 +36,17 @@ const double RESAMPLE_LIKELIHOOD_TEMPERATURE = 1000.0;
 #include "src/programs.cu"
 #include "src/bayes.cu"
 #include "src/virtual-machine.cu"
-#include "src/kernel.cu"
 #include "src/hypothesis-array.cu"
+#include "src/kernels/MH-kernel.cu"
+#include "src/kernels/prior-kernel.cu"
+#include "src/kernels/search-kernel.cu"
 
 using namespace std;
 
 int N = 1024;  // Hw many chains?
 int NTOP = 5000; // store this many of the "top" hypotheses (for resampling).
 
-const int BLOCK_SIZE = 256; // WOW 16 appears to be fastest here...
+const int BLOCK_SIZE = 128; // WOW 16 appears to be fastest here...
 int N_BLOCKS = 0; // set below
 
 string in_file_path = "data.txt"; 
@@ -59,7 +63,7 @@ int EVEN_HALF_DATA  = 0; // use only the even half of the data
 
 int PROPOSAL = 0x2; // a binary sum code for each type of proposal: 1: from prior, 2: standard tree-generation, 4: insert/delete moves (both)
 
-int MAIN_LOOP = 2; // an integer code for 
+int END_OF_BLOCK_ACTION = 2; // an integer code for 
 /* 
  * 1: start anew each outer loop (restart from prior)
  * 2: maintain the same chain (just print the most recent sample)
@@ -86,7 +90,7 @@ static struct option long_options[] =
 		{"seed",         required_argument,    NULL, 's'},
 		{"proposal",     required_argument,    NULL, 'p'},
 		{"max-program-length",   required_argument,    NULL, 'L'},
-		{"main-loop",     required_argument,        NULL, 'm'},
+		{"end-of-block-action",     required_argument,        NULL, 'm'},
 		{"print-top",    required_argument,    NULL, 't'},
 		{"burn",         required_argument,    NULL, 'b'},
 		{"first-half",   no_argument,    NULL, 'f'},
@@ -116,11 +120,9 @@ int main(int argc, char** argv)
 			case 'o': OUTER_BLOCKS = atoi(optarg); break;
 			case 'O': OUT_PATH = optarg; break;
 			case 'b': BURN_BLOCKS = atoi(optarg); break;
-			case 'T': POSTERIOR_TEMPERATURE = (float)atof(optarg); break;
 			case 's': SEED = (float)atof(optarg); break;
 			case 'f': FIRST_HALF_DATA = 1; break;
-			case 'm': MAIN_LOOP = atoi(optarg); break;
-			//case 't': PRINT_TOP = atoi(optarg); break; // NO LONGER IMPLEMENTED
+			case 'm': END_OF_BLOCK_ACTION = atoi(optarg); break;
 			case 'e': EVEN_HALF_DATA = 1; break;
 			case 'p': PROPOSAL = atoi(optarg); break;
 			case 'L': set_MAX_PROGRAM_LENGTH(atoi(optarg)); break;
@@ -173,9 +175,8 @@ int main(int argc, char** argv)
 	fprintf(fp, "\tBlocks: %i\n", OUTER_BLOCKS);
 	fprintf(fp, "\tBurn Blocks: %i\n", BURN_BLOCKS);
 	fprintf(fp, "\tN chains: %i\n", N);
-	fprintf(fp, "\tTemperature: %f\n", POSTERIOR_TEMPERATURE);
 	fprintf(fp, "\tSEED: %i\n", seed);
-	fprintf(fp, "\tMain Loop: %i\n", MAIN_LOOP);
+	fprintf(fp, "\tEnd of block action: %i\n", END_OF_BLOCK_ACTION);
 	fprintf(fp, "\tProposal: %i\n", PROPOSAL);
 	fprintf(fp, "\tMax program length: %i\n", hMAX_PROGRAM_LENGTH);
 	fprintf(fp, "\n\n");
@@ -183,7 +184,7 @@ int main(int argc, char** argv)
 	
 	fp = fopen(PERFORMANCE_PATH.c_str(), "w");
 	if(fp==NULL) { cerr << "*** ERROR: Cannot open file:\t" << PERFORMANCE_PATH <<"\n"; exit(1);}
-	fprintf(fp, "block\tdevice.time\ttransfer.time\thost.time\tsamples.per.second\tf.per.second\tprimitives.per.second\ttransfer.mb.per.second\n");
+	fprintf(fp, "block\tperfect.ll\tMAP.ll\tdevice.time\ttransfer.time\thost.time\tsamples.per.second\tf.per.second\tprimitives.per.second\ttransfer.mb.per.second\n");
 	fclose(fp);
 	
 	// -----------------------------------------------------------------------
@@ -195,7 +196,12 @@ int main(int argc, char** argv)
 	
 	const int DLEN = data_vec->size();
 	const size_t DATA_BYTE_LEN = DLEN*sizeof(datum);
-	
+
+	// compute the maximum possible ll
+	// we use this for the start of annealing temperature
+	float PERFECT_LL = 0.0;
+	for(int di=0;di<DLEN;di++) { PERFECT_LL += lnormalpdf( 0.0, host_data[di].sd); }	
+
 	// Echo the run data if we want:
 // 	for(int i=0;i<DLEN;i++)	printf("# %4.4f\t%4.4f\t%4.4f\n", host_data[i].input, host_data[i].output, host_data[i].sd);
 	
@@ -203,14 +209,13 @@ int main(int argc, char** argv)
 	datum* device_data; 
 	cudaMalloc((void **) &device_data, DATA_BYTE_LEN);
 	cudaMemcpy(device_data, host_data, DATA_BYTE_LEN, cudaMemcpyHostToDevice);
-		
+	
 	// -----------------------------------------------------------------------
 	// Set up the prior
 	// -----------------------------------------------------------------------
 	
 	assert(NUM_OPS < MAX_NUM_OPS);  // check that we don't have too many for our array
 
-	
 	// how many times have we seen each number of args?
 	int count_args[] = {0,0,0};
 	for(int i=1;i<NUM_OPS;i++){  // skip NOOP
@@ -258,11 +263,18 @@ int main(int argc, char** argv)
 	for(int i=0;i<NUM_OPS;i++) hPRIOR[i] /= priorZ;
 
 	// and copy PRIOR over to the device
-	cudaGetErrorString(cudaMemcpyToSymbol(dPRIOR, hPRIOR, MAX_NUM_OPS*sizeof(float), 0, cudaMemcpyHostToDevice));
+	cudaMemcpyToSymbol(dPRIOR, hPRIOR, MAX_NUM_OPS*sizeof(float), 0, cudaMemcpyHostToDevice);
 	
 	// Echo the prior
-// 	for(int i=0;i<NUM_OPS;i++) cerr << i << "  " << NAMES[i] << " -->" << hPRIOR[i] << endl;
-// 	return;
+	fp = fopen(LOG_PATH.c_str(), "a");
+	if(fp==NULL) { cerr << "*** ERROR: Cannot open file:\t" << LOG_PATH <<"\n"; exit(1);}
+	
+	fprintf(fp, "\n-----------------------------------------------------------------\n");
+	fprintf(fp, "-- Prior:\n");
+	fprintf(fp, "-----------------------------------------------------------------\n");
+	for(int i=0;i<NUM_OPS;i++) 
+		fprintf(fp, "\t%i\t%s\t%f\n", i, NAMES[i], hPRIOR[i]);
+	fclose(fp);
 
 	// -----------------------------------------------------------------------
 	// Set up some bits...
@@ -304,7 +316,7 @@ int main(int argc, char** argv)
 	// Main loop
 	// -----------------------------------------------------------------------
 	
-	time_t start_t, stop_t;
+	clock_t mytimer;
 	double secDEVICE, secHOST, secTRANSFER; // how long do we spend on each?
 	
 	for(int outer=0;outer<OUTER_BLOCKS+BURN_BLOCKS;outer++) {
@@ -315,20 +327,18 @@ int main(int argc, char** argv)
 		// -----------------------------------------------------------------------------------------------------
 		// Run
 		
-		time(&start_t);
-		kernel<<<N_BLOCKS,BLOCK_SIZE>>>(N, PROPOSAL, MCMC_ITERATIONS, POSTERIOR_TEMPERATURE, DLEN, device_data, device_hypotheses, device_out_MAPs, seed+N*outer,  (outer==0)||(MAIN_LOOP==1) );
+		mytimer = clock();
+		MH_kernel<<<N_BLOCKS,BLOCK_SIZE>>>(N, PROPOSAL, MCMC_ITERATIONS, PERFECT_LL, DLEN, device_data, device_hypotheses, device_out_MAPs, seed+N*outer,  (outer==0)||(END_OF_BLOCK_ACTION==1) );
 		cudaDeviceSynchronize(); // wait for preceedings requests to finish
-		time(&stop_t);
-		secDEVICE = difftime(stop_t, start_t);
+		secDEVICE = double(clock() - mytimer) / CLOCKS_PER_SEC;
 		
-		time(&start_t);
 		// Retrieve result from device and store it in host array
+		mytimer = clock();
 		cudaMemcpy(host_hypotheses, device_hypotheses, HYPOTHESIS_ARRAY_SIZE, cudaMemcpyDeviceToHost);
 		cudaMemcpy(host_out_MAPs,   device_out_MAPs,   HYPOTHESIS_ARRAY_SIZE, cudaMemcpyDeviceToHost);
-		time(&stop_t);
-		secTRANSFER = difftime(stop_t, start_t);
+		secTRANSFER = double(clock() - mytimer) / CLOCKS_PER_SEC;
 		
-		time(&start_t);
+		mytimer = clock(); // for host timing
 		
 		// sort them as required below
 		qsort( (void*)host_out_MAPs,   N, sizeof(hypothesis), hypothesis_posterior_compare);
@@ -336,10 +346,10 @@ int main(int argc, char** argv)
 		
 		// make sure our check bits have not changed -- that we didn't overrun anything
 		for(int rank=0; rank<N; rank++){
-			assert(host_hypotheses[rank].check0 == 33);
-			assert(host_hypotheses[rank].check1 == 33);
-			assert(host_hypotheses[rank].check2 == 33);
-			assert(host_hypotheses[rank].check3 == 33);
+			assert(host_hypotheses[rank].check0 == CHECK_BIT);
+			assert(host_hypotheses[rank].check1 == CHECK_BIT);
+			assert(host_hypotheses[rank].check2 == CHECK_BIT);
+			assert(host_hypotheses[rank].check3 == CHECK_BIT);
 		}
 
 		// -----------------------------------------------------------------------------------------------------
@@ -380,13 +390,13 @@ int main(int argc, char** argv)
 		// -----------------------------------------------------------------------------------------------------
 		// Now how to handle the end of a "block" -- what update do we do?
 		
-		if(MAIN_LOOP == 1) {
+		if(END_OF_BLOCK_ACTION == 1) {
 			// Then we just regenerate. This happens above by passing the last variable to device_run
 		}
-		else if(MAIN_LOOP == 2) {
+		else if(END_OF_BLOCK_ACTION == 2) {
 			// Then we do nothing. Continue the same chain
 		}
-		else if(MAIN_LOOP == 3) {
+		else if(END_OF_BLOCK_ACTION == 3) {
 			
 			// host_hypotheses already sorted to be best-last
 			
@@ -397,7 +407,7 @@ int main(int argc, char** argv)
 			// Since we modified, copy back to the device arrays
 			cudaMemcpy(device_hypotheses, host_hypothesis_tmp, HYPOTHESIS_ARRAY_SIZE, cudaMemcpyHostToDevice);
 		}
-		else if(MAIN_LOOP == 4) {
+		else if(END_OF_BLOCK_ACTION == 4) {
 		
 			// resort to be best-last -- but *only* sort the top NTOP (*not* all of them!)
 			qsort(  (void*)host_top_hypotheses, NTOP, sizeof(hypothesis), hypothesis_posterior_compare);
@@ -408,11 +418,10 @@ int main(int argc, char** argv)
 			// Since we modified, copy back to the device array
 			cudaMemcpy(device_hypotheses, host_hypothesis_tmp, HYPOTHESIS_ARRAY_SIZE, cudaMemcpyHostToDevice);
 		}
-		time(&stop_t);
-		secHOST = difftime(stop_t, start_t);
+		secHOST = double(clock() - mytimer) / CLOCKS_PER_SEC;
 		
 		// -----------------------------------------------------------------------------------------------------
-		// output some performance stats
+		// output some performance stats (we do this for burn blocks)
 		
 		double secTOTAL = secHOST + secTRANSFER + secDEVICE;
 		
@@ -420,15 +429,17 @@ int main(int argc, char** argv)
 		for(int i=0;i<N;i++) total_primitives += host_hypotheses[i].program_length;
 		
 		FILE* fp = fopen(PERFORMANCE_PATH.c_str(), "a");
-		fprintf(fp, "%i\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\n",
-			 outer, 
-	                 secDEVICE, 
-	                 secTRANSFER, 
-	                 secHOST, 
-	                 double(N)*double(MCMC_ITERATIONS)*double(__builtin_popcount(PROPOSAL))/ secTOTAL,
-			 double(N)*double(MCMC_ITERATIONS)*double(DLEN)*double(__builtin_popcount(PROPOSAL))/secTOTAL,
-			 double(MCMC_ITERATIONS)*double(__builtin_popcount(PROPOSAL))*double(DLEN)*double(total_primitives)/secTOTAL, 
-			 double(sizeof(host_out_MAPs) + sizeof(host_hypotheses))/(1048576. * secTRANSFER)   );
+		fprintf(fp, "%i\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\n",
+			outer, 
+			PERFECT_LL,
+			host_top_hypotheses[0].likelihood, 
+			secDEVICE, 
+			secTRANSFER, 
+			secHOST, 
+			double(N)*double(MCMC_ITERATIONS)*double(__builtin_popcount(PROPOSAL))/ secTOTAL,
+			double(N)*double(MCMC_ITERATIONS)*double(DLEN)*double(__builtin_popcount(PROPOSAL))/secTOTAL,
+			double(MCMC_ITERATIONS)*double(__builtin_popcount(PROPOSAL))*double(DLEN)*double(total_primitives)/secTOTAL, 
+			double(sizeof(host_out_MAPs) + sizeof(host_hypotheses))/(1048576. * secTRANSFER)   );
 		fclose(fp);
 	}
 

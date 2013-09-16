@@ -11,7 +11,7 @@ all: main.o
 	g++ -m64 -o gpumcmc main.o -L/usr/local/cuda-5.0/lib64 -lcudart
 
 	
-main.o: src/main.cu src/misc.cu src/bayes.cu src/hypothesis.cu src/programs.cu src/kernel.cu src/hypothesis-array.cu src/virtual-machine.cu src/data.cu
+main.o: src/main.cu src/misc.cu src/bayes.cu src/hypothesis.cu src/programs.cu src/kernels/MH-kernel.cu src/kernels/prior-kernel.cu src/kernels/search-kernel.cu src/hypothesis-array.cu src/virtual-machine.cu src/data.cu
 
 	/usr/local/cuda-5.0/bin/nvcc $(NVCC_FLAGS) -I$(CUDA_INCLUDE) -I. -I$(CUDA_SAMPLES_INCLUDE) -o main.o -c src/main.cu 
 	

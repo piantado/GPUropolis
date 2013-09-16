@@ -7,7 +7,9 @@
 
 // Kernel that executes on the CUDA device
 // initialize_sample here will make us resample if 1; else we use out_hypothesis as-is and propose form that
-__global__ void kernel(int N, int PROPOSAL, int MCMC_ITERATIONS, float POSTERIOR_TEMPERATURE, int DLEN, datum* device_data, hypothesis* out_hypotheses, hypothesis* out_MAPs, int myseed, int initialize_sample)
+// defaultly we use an annealing schedule: 1/2 of MCMC_ITERATIONS are spent going from LL_TEMP_START down to 1.0
+// and the rest are spent at 1.0
+__global__ void MH_kernel(int N, int PROPOSAL, int MCMC_ITERATIONS, float LL_TEMP_START, int DLEN, datum* device_data, hypothesis* out_hypotheses, hypothesis* out_MAPs, int myseed, int initialize_sample)
 {
 	int idx = blockIdx.x * blockDim.x + threadIdx.x;
 	if(idx >= N) { return; }  // MUST have this or else all hell breaks loose, impossible to debug
@@ -38,9 +40,12 @@ __global__ void kernel(int N, int PROPOSAL, int MCMC_ITERATIONS, float POSTERIOR
 	compute_length_and_proposal_generation_lp(current); // should go BEFORE compute_posterior
 	compute_posterior(DLEN, device_data, current, stack);
 	
-	// initialize proposal and MAP to be current
+	// initialize everything to be the current (especially proposal and MAP)
 	memcpy( (void*) proposal,    (void*)current, sizeof(hypothesis));
 	memcpy( (void*) current_MAP, (void*)current, sizeof(hypothesis));
+	memcpy( (void*) tmpH1, (void*)current, sizeof(hypothesis));
+	memcpy( (void*) tmpH2, (void*)current, sizeof(hypothesis));
+	memcpy( (void*) tmpH3, (void*)current, sizeof(hypothesis));
 	
 	// Stats on MCMC
 	int this_chain_acceptance_count = 0;
@@ -48,7 +53,7 @@ __global__ void kernel(int N, int PROPOSAL, int MCMC_ITERATIONS, float POSTERIOR
 	
 	// Now main MCMC iterations	
 	for(int mcmci=0;mcmci<MCMC_ITERATIONS;mcmci++) {
-		for(int pp=0;pp<=4;pp++) { // for each kind of proposal
+		for(int pp=0;pp<=3;pp++) { // for each kind of proposal
 			float fb = 0.0;  // the forward-backward probability
 			int ran=0; // did we actually run on this iteration, or were we looping over proposals not in PROPOSAL?
 			
@@ -144,14 +149,20 @@ __global__ void kernel(int N, int PROPOSAL, int MCMC_ITERATIONS, float POSTERIOR
 		
 				ran = 1;
 			}
-			
+				
 			if(ran) {
 				// compute the posterior for the proposal
 				compute_posterior(DLEN, device_data, proposal, stack);
 				this_chain_proposals += 1; // how many total proposals have we made?
-							
+				
+				// An annealing step. Since the prior is close to the generation probability, the difference in priors
+				// will tend to cancel with fb. So we just do a temperature on the likelihood. 
+				// For simplicity, we start a LL_TEMP_START and use half of our steps to go down to 1.0, and then 
+				// the second half to sample at that likelihood temperature
+				float lltemp = LL_TEMP_START * max(0.0, (1.0-float(mcmci*2)/float(MCMC_ITERATIONS))) + 1.0; // make the second half of steps at right temperature
+				
 				// compute whether not we accept the proposal, while rejecting infs and nans
-				int swap = (random_float(rx,ry,rz,rw) < exp((proposal->posterior - current->posterior)/POSTERIOR_TEMPERATURE - fb) && is_valid(proposal->posterior)) || !is_valid(current->posterior);
+				int swap = (random_float(rx,ry,rz,rw) < exp( (proposal->prior + proposal->likelihood / lltemp - current->prior - current->likelihood/lltemp - fb) )) && is_valid(proposal->posterior) || !is_valid(current->posterior);
 				
 				// swap if we should
 				if(swap) {

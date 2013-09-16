@@ -13,7 +13,7 @@ name2args, name2rhs = dict(), dict()
 
 for filename in sys.argv[1:]:
 	for line in open(filename):
-		if re.match("^\s*#", line): continue # skip comments
+		if re.match("^\s*#", line) or not re.match(r"[a-zA-Z0-9]",line): continue # skip comments
 		line = line.strip() # remove whitespace
 		
 		name, args, rhs = re.split(r"\t", line)
@@ -54,7 +54,7 @@ print >>primitives, "\n\n"
 # Leave a space ina ll for NOOP
 print >>primitives, " __constant__ const int NARGS[]  = {0, "+",".join([name2args[n] for n in names])+" };"
 print >>primitives, "              const int hNARGS[] = {0, "+",".join([name2args[n] for n in names])+" };"
-print >>primitives, " const char* NAMES[] = { \"<NA>\", "+",".join(["\""+re.sub("_$","",n).lower()+"\"" for n in names])+" };"
+print >>primitives, " const char* NAMES[] = { \"<NA>\", "+",".join(["\""+re.sub("_$","",n if name2args[n]==0 else n.lower())+"\"" for n in names])+" };"
 primitives.close()
 
 

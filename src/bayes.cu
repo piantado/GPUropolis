@@ -42,9 +42,10 @@ __device__ float compute_prior(hypothesis* h) {
 	
 	// We just use the proposal as a prior
 	// NOTE: This means compute_generation_probability MUST be called beforee compute_posterior
-// 	return  h->proposal_generation_lp / PRIOR_TEMPERATURE;
+ 	h->prior =  h->proposal_generation_lp / PRIOR_TEMPERATURE;
 	
-	h->prior = compute_x1depth_prior(h) / PRIOR_TEMPERATURE;
+	// The fancy other prior
+// 	h->prior = compute_x1depth_prior(h) / PRIOR_TEMPERATURE;
 	
 	return h->prior;
 }
