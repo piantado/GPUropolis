@@ -2,6 +2,6 @@
 ABS	1	abs(stack[top])
 ROUND	1	round(stack[top])
 GAMMA	1	tgamma(stack[top])
-SGN	1	(stack[top]>0) - (stack[top]<0)
+SGN	1	(stack[top]>0)-(stack[top]<0)
 SQRT	1	__fsqrt_rz(stack[top])
 

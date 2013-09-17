@@ -45,7 +45,6 @@ vector<datum>* load_data_file(const char* datapath, int FIRST_HALF_DATA, int EVE
 	fclose(fp);
 	
 	// Trim the data based on first/second half or even odd
-	
 	if(FIRST_HALF_DATA){
 		int mid = d->size()/2;
 		for(int i=d->size()-1;i>=mid;i--) {

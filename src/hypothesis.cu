@@ -9,9 +9,9 @@
 // here all hypotheses are allocated the maximum amount of memory
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-const int     MAX_MAX_PROGRAM_LENGTH = 100; // the most this could ever be. 
-int              hMAX_PROGRAM_LENGTH = 25; // on the hostA
-__constant__ int dMAX_PROGRAM_LENGTH = 25; // on the device
+const int      MAX_MAX_PROGRAM_LENGTH = 100; // the most this could ever be. 
+int            hMAX_PROGRAM_LENGTH = 25; // on the hostA
+__device__ int dMAX_PROGRAM_LENGTH = 25; // on the device
 
 // we must use a function to set the program length, because its used on local and global vars
 void set_MAX_PROGRAM_LENGTH(int v){

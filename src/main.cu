@@ -40,6 +40,7 @@ const double RESAMPLE_LIKELIHOOD_TEMPERATURE = 1000.0;
 #include "src/kernels/MH-kernel.cu"
 #include "src/kernels/prior-kernel.cu"
 #include "src/kernels/search-kernel.cu"
+#include "src/kernels/MH-adaptive-anneal.cu"
 
 using namespace std;
 
@@ -329,10 +330,10 @@ int main(int argc, char** argv)
 		
 		// decide on the LL temperature we'll run on
 		double thetemp = PERFECT_LL;
-		if(outer > 0 and is_valid(host_top_hypotheses[0].likelihood) ) thetemp = host_top_hypotheses[0].likelihood;
+		if(outer > 0 and is_valid(host_top_hypotheses[0].likelihood) ) thetemp = -host_top_hypotheses[0].likelihood;
 		
 		mytimer = clock();
-		MH_kernel<<<N_BLOCKS,BLOCK_SIZE>>>(N, PROPOSAL, MCMC_ITERATIONS, thetemp, DLEN, device_data, device_hypotheses, device_out_MAPs, seed+N*outer,  (outer==0)||(END_OF_BLOCK_ACTION==1) );
+		MH_kernel_AA<<<N_BLOCKS,BLOCK_SIZE>>>(N, PROPOSAL, MCMC_ITERATIONS, thetemp, DLEN, device_data, device_hypotheses, device_out_MAPs, seed+N*outer,  (outer==0)||(END_OF_BLOCK_ACTION==1) );
 		cudaDeviceSynchronize(); // wait for preceedings requests to finish
 		secDEVICE = double(clock() - mytimer) / CLOCKS_PER_SEC;
 		

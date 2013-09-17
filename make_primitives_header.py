@@ -52,8 +52,8 @@ print >>primitives, "enum OPS { NOOP_=0,"+",".join([ n+"="+str(i+1) for i,n in e
 print >>primitives, "\n\n"
 
 # Leave a space ina ll for NOOP
-print >>primitives, " __constant__ const int NARGS[]  = {0, "+",".join([name2args[n] for n in names])+" };"
-print >>primitives, "              const int hNARGS[] = {0, "+",".join([name2args[n] for n in names])+" };"
+print >>primitives, "__device__ const int NARGS[]  = {0, "+",".join([name2args[n] for n in names])+" };"
+print >>primitives, " const int hNARGS[] = {0, "+",".join([name2args[n] for n in names])+" };"
 print >>primitives, " const char* NAMES[] = { \"<NA>\", "+",".join(["\""+re.sub("_$","",n if name2args[n]==0 else n.lower())+"\"" for n in names])+" };"
 primitives.close()
 
