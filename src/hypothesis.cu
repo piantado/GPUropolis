@@ -14,6 +14,7 @@ int            hMAX_PROGRAM_LENGTH = 25; // on the hostA
 __device__ int dMAX_PROGRAM_LENGTH = 25; // on the device
 
 // we must use a function to set the program length, because its used on local and global vars
+// TODO: WHEN WE DO THIS, WE HAVE TO MAKE SURE THE HYPOTHESES ARE COPIED TO THE END OF THEIR PROGRAMS IF WE WANT THEM!
 void set_MAX_PROGRAM_LENGTH(int v){
 	assert(v < MAX_MAX_PROGRAM_LENGTH);
 	hMAX_PROGRAM_LENGTH = v;

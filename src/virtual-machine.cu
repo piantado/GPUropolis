@@ -18,7 +18,7 @@ __device__ data_t f_output(data_t X, hypothesis* h, data_t* stack) {
 		int newtop = top + stack_change(op);
 		
 		// If top is out of range, this makes it a NOOP if we go out of range, preventing us from having to initialize the stack
-		op = op*(top>=0)*(newtop>=0)*(top<dMAX_PROGRAM_LENGTH)*(newtop<dMAX_PROGRAM_LENGTH);
+		op = op*(top>=0 & newtop>=0 & top<dMAX_PROGRAM_LENGTH & newtop<dMAX_PROGRAM_LENGTH);
 		
 		switch(op){
 			// Fast ops: http://developer.download.nvidia.com/compute/cuda/4_2/rel/toolkit/docs/online/group__CUDA__MATH__INTRINSIC__SINGLE.html

@@ -72,7 +72,7 @@ __global__ void MH_kernel_AA(int N, int PROPOSAL, int MCMC_ITERATIONS, float LL_
 		// We'll scale exponentially between LL_TEMP_START and 1.0, using 0.5 - (the acceptace ratio) to interpolate between
 		
 		// exponentially increase the temperature as we reject
-		float lltemp = __powf(LL_TEMP_START, float(current_acceptance_tries)/100.0); // divide by the target so when we = target, we are at T=1
+		float lltemp = __powf(LL_TEMP_START, float(current_acceptance_tries)/50.0); // divide by the target so when we = target, we are at T=1
 		
 // 		float r = float(this_chain_acceptance_count+1) / float(this_chain_proposals+1);
 // 		float lltemp = __powf(LL_TEMP_START, 0.5-r); // divide by the target so when we = target, we are at T=1
@@ -89,6 +89,8 @@ __global__ void MH_kernel_AA(int N, int PROPOSAL, int MCMC_ITERATIONS, float LL_
 			
 			// update the chain acceptance count
 			this_chain_acceptance_count += 1;
+			
+			// reset counter for number of rejections in a row
 			current_acceptance_tries = 0;
 			
 			// and update the MAP if we should

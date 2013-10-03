@@ -70,6 +70,26 @@ __device__ float random_lnormal(float u, float s, int& x, int& y, int& z, int& w
 	return exp(u+s*random_normal(x,y,z,w));
 }
 
+
+// geometric sample from P on 0,1,2,..., with a max (inclusive) value of m
+__device__ int truncated_geometric(float P, int m, RNG_DEF){ 
+	
+	int i=0;
+	while( random_float(RNG_ARGS) < P && i < m) i++;
+	return i;
+}
+
+
+// the log probability of our truncated geometric
+__device__ float ltruncated_geometric(int x, float P, int m){ 
+	// TODO: PLEASE CHECK THIS
+	
+	if(x < m)     return log(P) * x + log(P-1); // standard geometric
+	else if(x==m) return log(P) * m; // truncation
+	else          return -1.0/0.0;
+}
+
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // Statistical functions
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

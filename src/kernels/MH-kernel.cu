@@ -162,7 +162,7 @@ __global__ void MH_kernel(int N, int PROPOSAL, int MCMC_ITERATIONS, float LL_TEM
 				float lltemp = LL_TEMP_START * max(0.0, (1.0-float(mcmci*2)/float(MCMC_ITERATIONS))) + 1.0; // make the second half of steps at right temperature
 				
 				// compute whether not we accept the proposal, while rejecting infs and nans
-				int swap = (random_float(rx,ry,rz,rw) < exp( (proposal->prior + proposal->likelihood / lltemp - current->prior - current->likelihood/lltemp - fb) )) && is_valid(proposal->posterior) || !is_valid(current->posterior);
+				int swap = (random_float(RNG_ARGS) < exp( (proposal->prior + proposal->likelihood / lltemp - current->prior - current->likelihood/lltemp - fb) )) && is_valid(proposal->posterior) || !is_valid(current->posterior);
 				
 				// swap if we should
 				if(swap) {

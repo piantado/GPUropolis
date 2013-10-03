@@ -59,7 +59,7 @@ __global__ void prior_kernel(int N, int PROPOSAL, int MCMC_ITERATIONS, float POS
 			this_chain_proposals += 1; // how many total proposals have we made?
 						
 			// compute whether not we accept the proposal, while rejecting infs and nans
-			int swap = (random_float(rx,ry,rz,rw) < exp((proposal->posterior - current->posterior)/POSTERIOR_TEMPERATURE - fb) && is_valid(proposal->posterior)) || !is_valid(current->posterior);
+			int swap = (random_float(RNG_ARGS) < exp((proposal->posterior - current->posterior)/POSTERIOR_TEMPERATURE - fb) && is_valid(proposal->posterior)) || !is_valid(current->posterior);
 			
 			// swap if we should
 			if(swap) {
