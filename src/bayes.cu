@@ -21,8 +21,11 @@ __device__ float compute_likelihood(int DLEN, datum* device_data, hypothesis* h,
 	for(int i=0;i<DLEN;i++){
 		//__syncthreads(); // NOT a speed improvement
 		
+		float val = f_output( device_data[i].input, h, stack);
+		if(!is_valid(val)) { ll = -infinity; break; }
+			
 		// compute the difference between the output and what we see
-		data_t d = device_data[i].output - f_output( device_data[i].input, h, stack);
+		data_t d = device_data[i].output - val;
 		
 		// and use a gaussian likelihood
 		ll += lnormalpdf(d, device_data[i].sd);
@@ -46,6 +49,10 @@ __device__ float compute_prior(hypothesis* h) {
 	
 	// The fancy other prior
 // 	h->prior = compute_x1depth_prior(h) / PRIOR_TEMPERATURE;
+	
+	
+	// Compute the constant prior:
+	h->prior += compute_constants_prior(h);
 	
 	return h->prior;
 }

@@ -4,6 +4,7 @@
  * Hypothesis definitions and functions
  */
 
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // Functions for setting and manipulating the program length
 // here all hypotheses are allocated the maximum amount of memory
@@ -21,6 +22,16 @@ void set_MAX_PROGRAM_LENGTH(int v){
 	cudaMemcpyToSymbol(dMAX_PROGRAM_LENGTH,&hMAX_PROGRAM_LENGTH,sizeof(int));
 }
 
+
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// Variables for the constants and their types
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+const int      MAX_CONSTANTS = 5; // how many constants per hypothesis at most?
+
+enum CONSTANT_TYPES { GAUSSIAN, LOGNORMAL, EXPONENTIAL, UNIFORM,        __N_CONSTANT_TYPES};
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // Hypothesis
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -33,6 +44,7 @@ typedef char op_t;
 // A struct for storing a hypothesis, which is a program and some accoutrements
 // the check variables are there to make sure we don't overrun anything in any program editing
 // main.cu has assertions to check they have CHECK_BIT value
+// This also stores some ability for constants, but these are not used by all MH schemes
 typedef struct hypothesis {
 	float prior;
 	float likelihood;
@@ -47,8 +59,17 @@ typedef struct hypothesis {
 	op_t   program[MAX_MAX_PROGRAM_LENGTH];
 	int check3;
 	int chain_index; // what index am I?
+	int check4;
+	float constants[MAX_CONSTANTS];
+	int check5;
+	int constant_types[MAX_CONSTANTS]; // 
+	int check6;
+	int nconstants; // how many constants are used?
 // 	int mutable_end; // what is the last index of program that proposals can change?
 } hypothesis;
+
+
+
 
 // A standard initialization that sets this thing up!
 void initialize(hypothesis* h){
@@ -58,13 +79,20 @@ void initialize(hypothesis* h){
 	h->proposal_generation_lp = 0.0; 
 	h->program_length = 0.0;
 	h->acceptance_ratio = 0.0;
+	h->nconstants = 0;
 
 	// Set some check bits to catch buffer overruns. If any change, we have a problem!
-	h->check0 = CHECK_BIT;	h->check1 = CHECK_BIT;	h->check2 = CHECK_BIT;	h->check3 = CHECK_BIT;
+	h->check0 = CHECK_BIT;	h->check1 = CHECK_BIT;	h->check2 = CHECK_BIT;	h->check3 = CHECK_BIT; 	h->check4 = CHECK_BIT; 	h->check5 = CHECK_BIT; 	h->check6 = CHECK_BIT;
 	
 	// zero the program
 	for(int i=0;i<hMAX_PROGRAM_LENGTH;i++)
 		h->program[i] = NOOP_; 
+	
+	// zero our constants
+	for(int i=0;i<MAX_CONSTANTS;i++) {
+		h->constants[i] = 0.0f;
+		h->constant_types[i] = 0x0;
+	}
 }
 
 // so we qsort so best is LAST
@@ -96,6 +124,20 @@ int sort_bestfirst_unique(const void* a, const void* b) {
 			if(x>y) return -1;
 		}
 		
+		// deal with constants
+		for(int i=0;i<MAX_CONSTANTS;i++){
+			float x = ah->constants[i];
+			float y = bh->constants[i];
+			if(x<y) return 1;
+			if(x>y) return -1;
+		}
+		
+		for(int i=0;i<MAX_CONSTANTS;i++){
+			int x = ah->constant_types[i];
+			int y = bh->constant_types[i];
+			if(x<y) return 1;
+			if(x>y) return -1;
+		}	
 	}
 	
 	return 0;
@@ -131,3 +173,84 @@ int hypothesis_structurally_identical( hypothesis* a, hypothesis* b) {
 // 	print_program_as_expression( h );
 // 	printf("\"\n");
 // }
+
+
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// Manipulate constants in hypotheses
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+// Take h and resample one of its constants according to the types
+// and return the f/b probability
+// __device__ float resample_random_constant(hypothesis* h, RNG_DEF) {
+// 	
+// 	int k = random_int(MAX_CONSTANTS, RNG_ARGS);
+// 	
+// 	float old_value = h->constants[k];
+// 	float new_value = 0.0;
+// 	float fb = 0.0;
+// 	switch(h->constant_types[k]) {
+// 		case GAUSSIAN:
+// 			new_value = random_normal(RNG_ARGS);
+// 			fb = lnormalpdf(new_value, 1.0) - lnormalpdf(old_value, 1.0); // these and all constants are set to the generation defaults
+// 			break;
+// 		case LOGNORMAL:
+// 			new_value = random_lnormal(0.0, 1.0, RNG_ARGS);
+// 			fb = llnormalpdf(new_value, 1.0) - llnormalpdf(old_value, 1.0);
+// 			break;
+// 		case EXPONENTIAL:
+// 			new_value = random_exponential(1.0, RNG_ARGS);
+// 			fb = lexponentialpdf(new_value, 1.0) - lexponentialpdf(old_value, 1.0);
+// 			break;
+// 		case UNIFORM:
+// 			new_value = random_float(RNG_ARGS);
+// 			fb = luniformpdf(new_value) - luniformpdf(old_value);
+// 			break;			
+// 	}
+// 	h->constants[k] = new_value;
+// 	return fb;	
+// }
+
+
+// a drift kernel
+__device__ float resample_random_constant(hypothesis* h, RNG_DEF) {
+	
+	int k = random_int(MAX_CONSTANTS, RNG_ARGS);
+	
+	float old_value = h->constants[k];
+	float new_value = old_value + random_normal(RNG_ARGS); // just drive a standard gaussian
+	h->constants[k] = new_value;
+	
+	// since it's symmetric drift kernel proposal,
+	return 0.0;	
+}
+
+// Take h and resample one of the constant *types*
+// returning fb
+// TODO: WE CAN MAKE THIS A local-GIBBS MOVE--compute the probability of the observed constant
+// under each type and resample!!
+__device__ float resample_random_constant_type(hypothesis* h, RNG_DEF) {
+	int k = random_int(MAX_CONSTANTS, RNG_ARGS);
+	h->constant_types[k] = random_int(__N_CONSTANT_TYPES, RNG_ARGS);
+	return 0.0;
+}
+
+// Compute the prior on constats
+// assuming constant types are generated uniformly
+__device__ float compute_constants_prior(hypothesis* h) {
+	
+	float lp = 0.0;
+	for(int k=0;k<MAX_CONSTANTS;k++) {
+		float value = h->constants[k];
+		
+		switch(h->constant_types[k]) {
+			case GAUSSIAN:    lp += lnormalpdf(value, 1.0); break;
+			case LOGNORMAL:   lp += llnormalpdf(value, 1.0); break;
+			case EXPONENTIAL: lp += lexponentialpdf(value, 1.0); break;
+			case UNIFORM:     lp += luniformpdf(value); break;	
+		}
+	}
+	
+	return lp;
+}
+

@@ -20,6 +20,9 @@
 #define nlogf(x) (-log(float(x)))
 #define logf(x)  log(float(x))
 
+#define infinity (1.0/0.0)
+#define nan (0.0/0.0)
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // Functions for avoiding branching. Most of these are just slow
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -95,6 +98,7 @@ __device__ float ltruncated_geometric(int x, float P, int m){
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 __device__ __host__ float lexponentialpdf(float x, float r) {
+	if(x < 0){ return -infinity; }
 	return log(r) - r*x;
 }
 
@@ -104,6 +108,39 @@ __device__ __host__ float lnormalpdf( float x, float s ){
 
 // log  log-normal
 __device__ __host__ float llnormalpdf(float x, float s) {
+	if(x <= 0) { return -infinity; }
 	return lnormalpdf( log(x), s) - log(x);
 }
+
+__device__ __host__ float luniformpdf( float x ){
+	if(x<0 || x>1){ return -infinity; }
+	return 0.0;
+}
+
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// My versions of primitives
+// Otherwise I seem to get weirdo values...
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+__device__ float my_pow(float x, float y) {
+	if(x < 0) return nan;
+	else return __powf(x,y);
+}
+
+__device__ float my_log(float x) {
+	if(x < 0) return nan;
+	else return __logf(x);
+}
+
+__device__ float my_gamma(float x) {
+	if(x < 0) return nan;
+	else return tgamma(x);
+}
+
+__device__ float my_sqrt(float x) {
+	if(x < 0) return nan;
+	else return __fsqrt_rz(x);
+}
+
 

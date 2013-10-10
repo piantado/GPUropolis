@@ -10,7 +10,7 @@ import numpy
 ---------------------------------------------------------------------------------------
 """
 
-from math import exp, sin as sin_, asin as asin_, isnan, log as log_, pow as power_
+from math import exp, sin as sin_, asin as asin_, isnan, log as log_, pow as power_, gamma as gamma_, sqrt as sqrt_
 
 try:			from scipy.misc import logsumexp 
 except ImportError:	from scipy.maxentropy import logsumexp 
@@ -24,6 +24,10 @@ def nanwrap(fn):
 
 def q(x):
 	return "\""+str(x)+"\""
+
+@nanwrap
+def sqrt(x):
+	return sqrt_(x)
 
 @nanwrap
 def sin(x): 
@@ -42,10 +46,23 @@ def sub(x,y): return x-y
 @nanwrap
 def mul(x,y): return x*y
 
+
+@nanwrap
+def sgn(x): 
+	if x<0: return -1
+	if x>0: return 1
+	return 0
+
 @nanwrap
 def div(x,y): 
 	if y == 0: return x*float("inf")
 	return x/y
+
+@nanwrap
+def gamma(x):
+	if(x <= 0): return float("nan")
+	
+	return gamma_(x)
 
 @nanwrap
 def log(x): 

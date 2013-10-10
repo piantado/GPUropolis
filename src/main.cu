@@ -23,7 +23,7 @@ const float X_PENALTY = 10.0; // penalty for using X
 // Specification of the prior
 // in tree resampling, the expected length here is important in getting a good acceptance rate -- too low
 // (meaning too long) and we will reject almost everything
-const float EXPECTED_LENGTH = 10.0;
+const float EXPECTED_LENGTH = 3.0; // also the expected length of proposals
 const float PRIOR_XtoCONSTANT = 0.1; //what proportion of constant proposals are x (as opposed to all other constants)?
 
 const double RESAMPLE_PRIOR_TEMPERATURE = 1000.0; // when we resample, what temperatures do we use?
@@ -38,6 +38,7 @@ const double RESAMPLE_LIKELIHOOD_TEMPERATURE = 1000.0;
 #include "src/virtual-machine.cu"
 #include "src/hypothesis-array.cu"
 #include "src/kernels/MH-kernel.cu"
+#include "src/kernels/MH-constant-kernel.cu"
 #include "src/kernels/MH-weighted-kernel.cu"
 #include "src/kernels/prior-kernel.cu"
 #include "src/kernels/search-kernel.cu"
@@ -303,7 +304,7 @@ int main(int argc, char** argv)
 	}
 
 	// store the top hypotheses overall
-	hypothesis* host_top_hypotheses = new hypothesis[NTOP+2*N]; // store NTOP plus 2N so we can store the sampesl and tops on the end, then remove duplicates
+	hypothesis* host_top_hypotheses = new hypothesis[NTOP+2*N]; // store NTOP plus 2N so we can store the samples and tops on the end, then remove duplicates
 	for(int i=0;i<NTOP+2*N;i++) initialize(&host_top_hypotheses[i]);
 	
 	// a special guy we keep  empty
@@ -333,8 +334,12 @@ int main(int argc, char** argv)
 // 		if(outer > 0 and is_valid(host_top_hypotheses[0].likelihood) ) thetemp = -host_top_hypotheses[0].likelihood;
 		
 		mytimer = clock();
-		MH_weighted_kernel<<<N_BLOCKS,BLOCK_SIZE>>>(N, MCMC_ITERATIONS, DLEN, device_data, device_hypotheses, device_out_MAPs, seed+N*outer,  (outer==0)||(END_OF_BLOCK_ACTION==1) );
+		MH_constant_kernel<<<N_BLOCKS,BLOCK_SIZE>>>(N, MCMC_ITERATIONS, DLEN, device_data, device_hypotheses, device_out_MAPs, seed+N*outer,  (outer==0)||(END_OF_BLOCK_ACTION==1) );
+
+// 		MH_weighted_kernel<<<N_BLOCKS,BLOCK_SIZE>>>(N, MCMC_ITERATIONS, DLEN, device_data, device_hypotheses, device_out_MAPs, seed+N*outer,  (outer==0)||(END_OF_BLOCK_ACTION==1) );
 // 		MH_kernel<<<N_BLOCKS,BLOCK_SIZE>>>(N, PROPOSAL, MCMC_ITERATIONS, thetemp, DLEN, device_data, device_hypotheses, device_out_MAPs, seed+N*outer,  (outer==0)||(END_OF_BLOCK_ACTION==1) );
+		
+		
 		cudaDeviceSynchronize(); // wait for preceedings requests to finish
 		secDEVICE = double(clock() - mytimer) / CLOCKS_PER_SEC;
 		
@@ -356,6 +361,9 @@ int main(int argc, char** argv)
 			assert(host_hypotheses[rank].check1 == CHECK_BIT);
 			assert(host_hypotheses[rank].check2 == CHECK_BIT);
 			assert(host_hypotheses[rank].check3 == CHECK_BIT);
+			assert(host_hypotheses[rank].check4 == CHECK_BIT);
+			assert(host_hypotheses[rank].check5 == CHECK_BIT);
+			assert(host_hypotheses[rank].check6 == CHECK_BIT);
 		}
 
 		// -----------------------------------------------------------------------------------------------------
@@ -380,6 +388,8 @@ int main(int argc, char** argv)
 		for(int i=0,j=0;i<NTOP;i++,j++) {
 			if(j<NTOP+2*N) {
 				// skip forward over everything identical
+				// NOTE: BECAUSE we do hypothesis_structurally_identical, we only store the top of each structure
+				// ignoring the differences in constants!
 				while(j+1 < NTOP+2*N && hypothesis_structurally_identical(&host_top_hypotheses[j], &host_top_hypotheses[j+1]))
 					j++;
 				

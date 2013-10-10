@@ -11,7 +11,7 @@ EXEC=./gpumcmc
 
 # for WHICHHALF in '' --first-half; do
 # for DATA in Boyle CLT Null Iris Iris-Function COBE PrimeCounting Zipf Constant Hubble Galileo BraheMars Stirling Shannon Sort; do
-for DATA in Zipf; do
+for DATA in COBE; do
 
 	echo Running $DATA !
 	
@@ -26,7 +26,7 @@ for DATA in Zipf; do
 	time /usr/bin/time --output=$OUT/time.txt $EXEC --proposal=$PROPOSAL --iterations=$ITERATIONS --in=data-sources/$DATA/data.txt --outer=$OUTER_BLOCKS --burn=$BURN_BLOCKS --N=$N --out=$OUT
 	
 	# And a python post-processing script to do plotting.
-	# We'll do this on the tops
-# 	nice -n 19 python plot.py --in=$OUT/tops.txt --data=data-sources/$DATA/data.txt --out=$OUT &
+	# Run in the background so we can move to the next plot
+# 	nice -n 19 python plot.py --directory=$OUT &
 
 done

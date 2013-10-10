@@ -5,8 +5,7 @@
  * (insert/delete are not well debugged yet)
  */
 
-// Kernel that executes on the CUDA device
-// initialize_sample here will make us resample if 1; else we use out_hypothesis as-is and propose form that
+// A Kernel for random hill-climbing search
 __global__ void search_kernel(int N, int PROPOSAL, int MCMC_ITERATIONS, float POSTERIOR_TEMPERATURE, int DLEN, datum* device_data, hypothesis* out_hypotheses, hypothesis* out_MAPs, int myseed, int initialize_sample)
 {
 	int idx = blockIdx.x * blockDim.x + threadIdx.x;
