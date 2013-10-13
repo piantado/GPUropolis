@@ -22,7 +22,7 @@ __device__ float compute_likelihood(int DLEN, datum* device_data, hypothesis* h,
 		//__syncthreads(); // NOT a speed improvement
 		
 		float val = f_output( device_data[i].input, h, stack);
-		if(!is_valid(val)) { ll = -infinity; break; }
+		if(is_invalid(val)) { ll = -1.0/0.0; break; }
 			
 		// compute the difference between the output and what we see
 		data_t d = device_data[i].output - val;
@@ -49,7 +49,6 @@ __device__ float compute_prior(hypothesis* h) {
 	
 	// The fancy other prior
 // 	h->prior = compute_x1depth_prior(h) / PRIOR_TEMPERATURE;
-	
 	
 	// Compute the constant prior:
 	h->prior += compute_constants_prior(h);

@@ -37,7 +37,7 @@ __global__ void MH_kernel(int N, int PROPOSAL, int MCMC_ITERATIONS, float LL_TEM
 	if(initialize_sample) random_closed_expression(current,  RNG_ARGS); 
 	
 	// update all the posterior, etc.
-	compute_length_and_proposal_generation_lp(current); // should go BEFORE compute_posterior
+	update_hypothesis(current); // should go BEFORE compute_posterior
 	compute_posterior(DLEN, device_data, current, stack);
 	
 	// initialize everything to be the current (especially proposal and MAP)
@@ -61,7 +61,7 @@ __global__ void MH_kernel(int N, int PROPOSAL, int MCMC_ITERATIONS, float LL_TEM
 				random_closed_expression(proposal, RNG_ARGS);
 				
 				// Update the proposal:
-				compute_length_and_proposal_generation_lp(proposal);
+				update_hypothesis(proposal);
 				
 				fb += proposal->proposal_generation_lp;
 				fb -= current->proposal_generation_lp;
@@ -76,7 +76,7 @@ __global__ void MH_kernel(int N, int PROPOSAL, int MCMC_ITERATIONS, float LL_TEM
 				replace_random_subnode_with(current, proposal, tmpH1, RNG_ARGS);
 				 
 				// update the proposal:
-				compute_length_and_proposal_generation_lp(proposal);
+				update_hypothesis(proposal);
 				
 				// forward-back probability
 				fb += (nlogf(current->program_length)+proposal->proposal_generation_lp );
@@ -106,7 +106,7 @@ __global__ void MH_kernel(int N, int PROPOSAL, int MCMC_ITERATIONS, float LL_TEM
 				replace_subnode_with(current, proposal, pos, insertedWithBelow);
 				
 				// and update
-				compute_length_and_proposal_generation_lp(proposal);
+				update_hypothesis(proposal);
 				
 				// Handle forward/back with teh multiple path problem. 
 				// TODO: CHECK THIS AGAIN PLEASE
@@ -139,7 +139,7 @@ __global__ void MH_kernel(int N, int PROPOSAL, int MCMC_ITERATIONS, float LL_TEM
 				// and replace
 				replace_subnode_with(current, proposal, pos, belowbelow);
 				
-				compute_length_and_proposal_generation_lp(proposal);
+				update_hypothesis(proposal);
 				
 				int cntid = count_identical_to(belowbelow, below, pos); 
 				

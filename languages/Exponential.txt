@@ -1,4 +1,4 @@
 # Name, NumberOfArgs, Stack operation (in CUDA/C)
 LOG	1	my_log(stack[top])
-EXP	1	__expf(stack[top])
+EXP	1	my_exp(stack[top])
 

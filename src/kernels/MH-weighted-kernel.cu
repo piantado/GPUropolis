@@ -39,7 +39,7 @@ __global__ void MH_weighted_kernel(int N, int MCMC_ITERATIONS, int DLEN, datum* 
 	if(initialize_sample) random_closed_expression(current,  RNG_ARGS); 
 	
 	// update all the posterior, etc.
-	compute_length_and_proposal_generation_lp(current); // should go BEFORE compute_posterior
+	update_hypothesis(current); // should go BEFORE compute_posterior
 	compute_posterior(DLEN, device_data, current, stack);
 	
 	// initialize everything to be the current (especially proposal and MAP)
@@ -108,7 +108,7 @@ __global__ void MH_weighted_kernel(int N, int MCMC_ITERATIONS, int DLEN, datum* 
 		replace_subnode_with(current, proposal, pos, tmpH1);
 			
 		// update the proposal:
-		compute_length_and_proposal_generation_lp(proposal);
+		update_hypothesis(proposal);
 		
 		// and the backward -- how many in proposal are at that depth?
 		int p_d = 0;

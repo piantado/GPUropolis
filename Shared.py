@@ -10,6 +10,7 @@ import numpy
 ---------------------------------------------------------------------------------------
 """
 
+from math import isinf
 from math import exp, sin as sin_, asin as asin_, isnan, log as log_, pow as power_, gamma as gamma_, sqrt as sqrt_
 
 try:			from scipy.misc import logsumexp 
@@ -81,17 +82,24 @@ def power(x,y):
 	return ret
 	
 	
-# Maps that can handle failure:
+# Maps that can handle failure
+# and that does not return inf/nan
 def failmap(f, xs):
 	# A better mapping that deals with some failures
 	ys = []
+	newx = []
 	for x in xs:
 		y = None
 		try: 
 			y = f(x)
 		except: pass
-		ys.append(y)
-	return ys	
+		
+		if y is not None and not isinf(y) and not isnan(y): 
+			ys.append(y)
+			newx.append(x)
+		
+		
+	return newx, ys	
 
 def smartrange(v, sds=0.0, pad=1.1):
 	if(len(v)==0): return [-1,1]

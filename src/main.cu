@@ -247,9 +247,13 @@ int main(int argc, char** argv)
 	float P_0arg = (1.0-2.0*P);
 	float P_X        = P_0arg * PRIOR_XtoCONSTANT;
 	float P_CONSTANT = P_0arg * (1.0-PRIOR_XtoCONSTANT) / float(count_args[0]-1);
-	float P_1arg  = P / float(count_args[1]);
-	float P_2arg  = P / float(count_args[2]);
-		
+	// This way will divide evenly between 1- and 2- args
+// 	float P_1arg  = P / float(count_args[1]);
+// 	float P_2arg  = P / float(count_args[2]);
+	// This way will put all mass equally among all functions, regardless of arity:
+	float P_1arg  = P * float(count_args[1]) / float(count_args[1] + count_args[2]);
+	float P_2arg  = P * float(count_args[2]) / float(count_args[1] + count_args[2]);;
+	
 	for(int i=0;i<MAX_NUM_OPS;i++) hPRIOR[i] = 0.0; // must initialize since not all will be used
 	
 	for(int i=0;i<NUM_OPS;i++) {
@@ -296,20 +300,24 @@ int main(int argc, char** argv)
 	// Initialize our hypotheses
 	// -----------------------------------------------------------------------
 	
+	// define random numbers:
+	int rx,ry,rz,rw;
+	rx = rand(); ry = rand(); rz = rand(); rw = rand();
+	
 	// initialize this local array (copied to CUDA after any further changes)
 	for(int n=0;n<N;n++){
-		initialize(&host_hypotheses[n]);
-		initialize(&host_out_MAPs[n]);
-		initialize(&host_hypothesis_tmp[n]);
+		initialize(&host_hypotheses[n], RNG_ARGS);
+		initialize(&host_out_MAPs[n], RNG_ARGS);
+		initialize(&host_hypothesis_tmp[n], RNG_ARGS);
 	}
 
 	// store the top hypotheses overall
 	hypothesis* host_top_hypotheses = new hypothesis[NTOP+2*N]; // store NTOP plus 2N so we can store the samples and tops on the end, then remove duplicates
-	for(int i=0;i<NTOP+2*N;i++) initialize(&host_top_hypotheses[i]);
+	for(int i=0;i<NTOP+2*N;i++) initialize(&host_top_hypotheses[i], RNG_ARGS);
 	
 	// a special guy we keep  empty
 	hypothesis blankhyp; 
-	initialize(&blankhyp);
+	initialize(&blankhyp, RNG_ARGS);
 		
 	// and copy these to device
 	cudaMemcpy(device_hypotheses, host_hypotheses, HYPOTHESIS_ARRAY_SIZE, cudaMemcpyHostToDevice);

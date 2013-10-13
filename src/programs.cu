@@ -145,7 +145,7 @@ __device__ void replace_random_subnode_with(hypothesis* from, hypothesis* to, hy
 // Sets hypothesis->program_length and hypothesis->proposal_generation_lp
 // This way we loop over the program one time fewer
 // also the number of constants
-__device__ void compute_length_and_proposal_generation_lp(hypothesis* h){
+__device__ void update_hypothesis(hypothesis* h){
 	
 	float gp = 0.0;
 	op_t* pi_ptr = h->program + (dMAX_PROGRAM_LENGTH-1);
@@ -164,7 +164,7 @@ __device__ void compute_length_and_proposal_generation_lp(hypothesis* h){
 		pi_ptr--; // move to previous program value
 	}
 	
-	h->nconstants = nconstants;
+	h->nconstants = min(nconstants,MAX_CONSTANTS); // must ensure that we don't ever think we have too many!
 	h->program_length = dMAX_PROGRAM_LENGTH-pos;
 	h->proposal_generation_lp = gp;
 
@@ -360,7 +360,9 @@ void print_program_as_expression(FILE* fp, hypothesis* h) {
 				break;
 			case CONSTANT_:
 				top += 1;
-				sprintf(SS[top],"%.6f",h->constants[constant_i]);
+				// AHHA, if we specify number of digits, we may round to 0, 
+				// which can go VERY bad for python later!
+				sprintf(SS[top],"%f",h->constants[constant_i]);
 				constant_i++;
 				break;
 			default: // Defaultly just use the name

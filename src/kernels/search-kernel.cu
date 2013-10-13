@@ -33,7 +33,7 @@ __global__ void search_kernel(int N, int PROPOSAL, int MCMC_ITERATIONS, float PO
 	if(initialize_sample) random_closed_expression(current,  RNG_ARGS); 
 	
 	// update all the posterior, etc.
-	compute_length_and_proposal_generation_lp(current); // should go BEFORE compute_posterior
+	update_hypothesis(current); // should go BEFORE compute_posterior
 	compute_posterior(DLEN, device_data, current, stack);
 	
 	// initialize everything to be the current (especially proposal and MAP)
@@ -58,7 +58,7 @@ __global__ void search_kernel(int N, int PROPOSAL, int MCMC_ITERATIONS, float PO
 			replace_random_subnode_with(current, tmpH2, tmpH1, RNG_ARGS);
 			
 			// update the proposal:
-			compute_length_and_proposal_generation_lp(tmpH2);
+			update_hypothesis(tmpH2);
 			
 			compute_posterior(DLEN, device_data, tmpH2, stack);
 			

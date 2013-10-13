@@ -26,7 +26,7 @@ assert os.path.exists(args['directory']), "Directory %s does not exist!"%args['d
 
 NCURVEPTS = 100 # How many curve points to plot?
 MAX_CONSTANTS = 10 # only print out at most this many constants for each hypotheses
-MIN_PLOT = 1e-5 # don't plot things lighter than this
+MIN_PLOT = 1e-4 # don't plot things lighter than this
 
 FPregex = r'[-+]?[0-9]*\.?[0-9]+(?:[eE][-+]?[0-9]+)?' # How to match floating points. Shoot me now.
 
@@ -39,7 +39,7 @@ for l in open(args['directory']+'/used-data/data.txt', 'r'):
 	l = l.strip()
 	if re.match("\s*#",l): continue
 	
-	x,y,sd = map(float, re.split("\s", l))
+	x,y,sd = map(float, re.split("\s+", l))
 	
 	xs.append(x)
 	ys.append(y)
@@ -49,7 +49,7 @@ ys = numpy.array(ys)
 sds = numpy.array(sds)
 
 if len(xs) == 0: newx = []
-else:            newx = numpy.arange(min(xs), max(xs), (max(xs)-min(xs))/float(NCURVEPTS))
+else:            newx = numpy.arange(0.99*min(xs), max(xs)*1.01, (1.01*max(xs)-0.99*min(xs))/float(NCURVEPTS))
 
 
 ## --------------------------------------
@@ -64,6 +64,7 @@ for l in open(args['directory']+'/samples.txt', 'r'):
 	lp = float(parts[2])
 	if lp>fullMaxLP and not isnan(lp): fullMaxLP = lp
 	
+print "# Max posterior found:", fullMaxLP
 
 H2cnt = defaultdict(int)
 H2post = dict()
@@ -103,13 +104,74 @@ Z = logsumexp([ x[0] for x in H2post.values() ])
 Zmax = max( [ x[0] for x in H2post.values() ])
 Zcnt = sum(H2cnt.values())
 
+print "# Loaded & compiled %i hypotheses!" % len(H2cnt.values())
+
+
+## --------------------------------------
+## Make the plots
+## --------------------------------------
+
+if not os.path.exists(args['directory']+"/plots/"): os.mkdir( args['directory']+"/plots/" )
+
+for method in ['lpZ', 'maxratio', 'count', 'one']:
+
+	fig = matplotlib.pyplot.figure(figsize=(5,4))
+	plt = fig.add_subplot(1,1,1)
+	
+	for h in sorted(H2cnt.keys(), key=lambda x: H2post[x][0]):
+		
+		if method == 'count':      p = log(H2cnt[h]+1) / log(Zcnt + len(H2cnt.keys()) ) # color on log scale
+		elif method == 'one':      p = 0.01
+		elif method == 'lpZ':      p = exp(H2post[h][0] - Z)
+		elif method == 'maxratio': p = exp(H2post[h][0] - Zmax)
+		print method, p, h
+		
+		if p < MIN_PLOT: continue
+		
+		plotx, ploty = failmap(H2f[h], newx)
+		#print plotx, ploty
+		## Hmm check here that we can get some values!
+		if not any([ v is not None for v in ploty]): 
+			print "Failed to compute any valid value! Aborting! %s" % h
+			continue
+		#assert any([ v is not None for v in newy]), "Failed to compute a valid value! Aborting! %s" % h
+		
+		try: 
+			plt.plot(plotx, ploty, alpha=p, color="gray")
+			#print newx, newy
+			#print "Plotted!"
+		except OverflowError: pass
+		except ValueError: pass
+		
+
+	## NOTE: These have to come before the data or sometimes it gets angry
+	plt.set_xlim( *smartrange(xs) )
+	plt.set_ylim( *smartrange(ys, sds=sds)  )
+	
+	# Plot the data
+	plt.scatter(xs ,ys, alpha=1.0, marker='.', color='red')
+	plt.errorbar(xs, ys, yerr=sds, alpha=1.0, fmt=None, ecolor='red')	
+
+	plt.set_xlabel("Time")
+	plt.set_ylabel("Distance")
+	
+	
+	if re.search(r"x", args['log']): plt.set_xscale('log')
+	if re.search(r"y", args['log']): plt.set_yscale('log')
+
+	fig.savefig(args['directory']+"/plots/"+method+".pdf")
+
+print "# Done plotting."
+
+
+
 ## --------------------------------------
 ## Now print out some stats:
 ## --------------------------------------
 
 o = open(args['directory']+"/hypotheses.txt", 'w')
 print >>o, "i first.found sample.count lp lpZ prior ll h hcon hform f0 f1 nconstants "+" ".join(['C%i'%i for i in xrange(MAX_CONSTANTS)])
-for hi, h in enumerate( sorted(H2cnt.keys(), key=lambda x: H2post[x][0]) ):
+for hi, h in enumerate( sorted(H2cnt.keys(), key=lambda x: H2post[x][0], reverse=True) ):
 	# And convert H to a more reasonable form:
 	try:
 		sympystr = str(parse_expr(h))
@@ -137,54 +199,7 @@ for hi, h in enumerate( sorted(H2cnt.keys(), key=lambda x: H2post[x][0]) ):
 	print >>o, hi, H2firstfound[h], H2cnt[h], H2post[h][0], H2post[h][0]-Z, H2post[h][1], H2post[h][2], q(h), q(sympystr), q(structural_form), f0,f1, nconstants, ' '.join(map(str,constants))	
 o.close()
 
-## --------------------------------------
-## Make the plots
-## --------------------------------------
-
-for method in ['lpZ', 'maxratio', 'count']:
-
-	fig = matplotlib.pyplot.figure(figsize=(5,4))
-	plt = fig.add_subplot(1,1,1)
-	
-	for h in sorted(H2cnt.keys(), key=lambda x: H2post[x][0]):
-		
-		if method == 'count':      p = float(H2cnt[h]) / float(Zcnt)
-		elif method == 'lpZ':      p = exp(H2post[h][0] - Z)
-		elif method == 'maxratio': p = exp(H2post[h][0] - Zmax)
-		print method, p, h
-		
-		if p < MIN_PLOT: continue
-		
-		newy = failmap(H2f[h], newx)
-		
-		assert any([ v is not None for v in newy]), "Failed to compute a valid value! Aborting! %s" % h
-		
-		try: 
-			plt.plot(newx, newy, alpha=p, color="gray")
-			#print newx, newy
-			#print "Plotted!"
-		except OverflowError: pass
-		except ValueError: pass
-		
-	# Plot the data
-	#print xs, ys
-	plt.scatter(xs,ys, alpha=0.5, marker='.', color='red')
-	plt.errorbar(xs, ys, yerr=sds, alpha=0.5, fmt=None, ecolor='red')	
-
-	plt.set_xlim( *smartrange(xs) )
-	
-	plt.set_xlabel("Time")
-	plt.set_ylabel("Distance")
-	
-	try:
-		plt.set_ylim( *smartrange(ys, sds=sds)  )
-	except OverflowError:
-		print "** ERROR OVERFLOW IN YLIM:", max(ys), min(ys), ys, max(sds), min(sds), sds
-
-	if re.search(r"x", args['log']): plt.set_xscale('log')
-	if re.search(r"y", args['log']): plt.set_yscale('log')
-
-	fig.savefig(args['directory']+"/plot-"+method+".pdf")
+print "# Done printing hypotheses!"
 
 # Done
 

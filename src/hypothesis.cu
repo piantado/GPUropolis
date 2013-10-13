@@ -28,9 +28,9 @@ void set_MAX_PROGRAM_LENGTH(int v){
 // Variables for the constants and their types
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-const int      MAX_CONSTANTS = 5; // how many constants per hypothesis at most?
+const int      MAX_CONSTANTS = 10; // how many constants per hypothesis at most?
 
-enum CONSTANT_TYPES { GAUSSIAN, LOGNORMAL, EXPONENTIAL, UNIFORM,        __N_CONSTANT_TYPES};
+enum CONSTANT_TYPES { GAUSSIAN, EXPONENTIAL, UNIFORM,        __N_CONSTANT_TYPES};
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // Hypothesis
@@ -65,14 +65,11 @@ typedef struct hypothesis {
 	int constant_types[MAX_CONSTANTS]; // 
 	int check6;
 	int nconstants; // how many constants are used?
-// 	int mutable_end; // what is the last index of program that proposals can change?
 } hypothesis;
 
 
-
-
 // A standard initialization that sets this thing up!
-void initialize(hypothesis* h){
+void initialize(hypothesis* h, RNG_DEF){
 	h->posterior = -1.0/0.0;
 	h->prior = -1.0/0.0;
 	h->likelihood = 0.0;
@@ -88,10 +85,10 @@ void initialize(hypothesis* h){
 	for(int i=0;i<hMAX_PROGRAM_LENGTH;i++)
 		h->program[i] = NOOP_; 
 	
-	// zero our constants
+	// Set up our constants -- just random
 	for(int i=0;i<MAX_CONSTANTS;i++) {
-		h->constants[i] = 0.0f;
-		h->constant_types[i] = 0x0;
+		h->constants[i] = random_normal(RNG_ARGS);
+		h->constant_types[i] = GAUSSIAN;
 	}
 }
 
@@ -100,8 +97,9 @@ int hypothesis_posterior_compare(const void* a, const void* b) {
 	float ap = ((hypothesis*)a)->posterior;
 	float bp = ((hypothesis*)b)->posterior; 
 	
-	if( ap>bp ) { return 1; }
-	if( ap<bp ) { return -1; }
+	// use != here to check for nan:
+	if( ap>bp || (bp!=bp) ) { return 1; }
+	if( ap<bp || (ap!=ap) ) { return -1; }
 	return 0;
 }
 
@@ -214,8 +212,9 @@ int hypothesis_structurally_identical( hypothesis* a, hypothesis* b) {
 
 // a drift kernel
 __device__ float resample_random_constant(hypothesis* h, RNG_DEF) {
+	if(h->nconstants == 0) return 0.0;
 	
-	int k = random_int(MAX_CONSTANTS, RNG_ARGS);
+	int k = random_int(h->nconstants, RNG_ARGS);
 	
 	float old_value = h->constants[k];
 	float new_value = old_value + random_normal(RNG_ARGS); // just drive a standard gaussian
@@ -230,22 +229,33 @@ __device__ float resample_random_constant(hypothesis* h, RNG_DEF) {
 // TODO: WE CAN MAKE THIS A local-GIBBS MOVE--compute the probability of the observed constant
 // under each type and resample!!
 __device__ float resample_random_constant_type(hypothesis* h, RNG_DEF) {
-	int k = random_int(MAX_CONSTANTS, RNG_ARGS);
+	if(h->nconstants == 0) return 0.0;
+	
+	int k = random_int(h->nconstants, RNG_ARGS);
 	h->constant_types[k] = random_int(__N_CONSTANT_TYPES, RNG_ARGS);
 	return 0.0;
 }
+
+// Randomize the constants
+// __device__ float randomize_constants(hypothesis* h, RNG_DEF) {
+// 	for(int k=0;k<MAX_CONSTANTS;k++) {
+// 		h->constants[k] = random_normal(RNG_ARGS);
+// 		h->constant_types[k] = random_int(__N_CONSTANT_TYPES, RNG_ARGS);
+// 	}
+// 	return 0.0;
+// }
 
 // Compute the prior on constats
 // assuming constant types are generated uniformly
 __device__ float compute_constants_prior(hypothesis* h) {
 	
 	float lp = 0.0;
-	for(int k=0;k<MAX_CONSTANTS;k++) {
+	for(int k=0;k<h->nconstants;k++) {
 		float value = h->constants[k];
 		
 		switch(h->constant_types[k]) {
 			case GAUSSIAN:    lp += lnormalpdf(value, 1.0); break;
-			case LOGNORMAL:   lp += llnormalpdf(value, 1.0); break;
+// 			case LOGNORMAL:   lp += llnormalpdf(value, 1.0); break;
 			case EXPONENTIAL: lp += lexponentialpdf(value, 1.0); break;
 			case UNIFORM:     lp += luniformpdf(value); break;	
 		}
