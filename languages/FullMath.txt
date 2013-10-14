@@ -4,4 +4,4 @@ ROUND	1	my_round(stack[top])
 GAMMA	1	my_gamma(stack[top])
 SGN	1	my_sgn(stack[top])
 SQRT	1	my_sqrt(stack[top])
-POW	2	my_pow(stack[top], stack[top-1])
+

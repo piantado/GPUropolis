@@ -4,14 +4,11 @@
 	case CONSTANT_: stack[newtop] = (constant_i<MAX_CONSTANTS) * h->constants[constant_i]; constant_i += (constant_i<MAX_CONSTANTS); break;
 	case X_: stack[newtop] = X; break;
 	case ONE_: stack[newtop] = 1.0; break;
-	case SQRT_: stack[newtop] = my_sqrt(stack[top]); break;
-	case NEG_: stack[newtop] = my_neg(stack[top]); break;
-	case ABS_: stack[newtop] = my_abs(stack[top]); break;
-	case ROUND_: stack[newtop] = my_round(stack[top]); break;
-	case LOG_: stack[newtop] = my_log(stack[top]); break;
 	case EXP_: stack[newtop] = my_exp(stack[top]); break;
+	case NEG_: stack[newtop] = my_neg(stack[top]); break;
+	case LOG_: stack[newtop] = my_log(stack[top]); break;
 	case ADD_: stack[newtop] = my_add(stack[top], stack[top-1]); break;
 	case SUB_: stack[newtop] = my_add(stack[top], -stack[top-1]); break;
 	case DIV_: stack[newtop] = my_div(stack[top], stack[top-1]); break;
 	case MUL_: stack[newtop] = my_mul(stack[top], stack[top-1]); break;
-	case POW_: stack[newtop] = my_pow(stack[top], stack[top-1]); break; 
+	case POW_: stack[newtop] = my_pow(stack[top], stack[top-1]); break;

@@ -137,7 +137,7 @@ for method in ['lpZ', 'maxratio', 'count', 'one']:
 		#assert any([ v is not None for v in newy]), "Failed to compute a valid value! Aborting! %s" % h
 		
 		try: 
-			plt.plot(plotx, ploty, alpha=p, color="gray")
+			plt.plot(plotx, ploty, alpha=p, color="gray", zorder=1)
 			#print newx, newy
 			#print "Plotted!"
 		except OverflowError: pass
@@ -149,8 +149,8 @@ for method in ['lpZ', 'maxratio', 'count', 'one']:
 	plt.set_ylim( *smartrange(ys, sds=sds)  )
 	
 	# Plot the data
-	plt.scatter(xs ,ys, alpha=1.0, marker='.', color='red')
-	plt.errorbar(xs, ys, yerr=sds, alpha=1.0, fmt=None, ecolor='red')	
+	plt.scatter(xs ,ys, alpha=1.0, marker='.', color='red', zorder=10)
+	plt.errorbar(xs, ys, yerr=sds, alpha=1.0, fmt=None, ecolor='red', zorder=9)	
 
 	plt.set_xlabel("Time")
 	plt.set_ylabel("Distance")

@@ -131,37 +131,39 @@ __device__ __host__ float luniformpdf( float x ){
 __device__ float my_pow(float x, float y) {
 	if(x < 0. || is_invalid(x) || is_invalid(y)) return CUDART_NAN_F;
 	if(x==0.0) return 0.0;
-	else return __powf(x,y);
+	
+	return exp(y * log(x));
+// 	return powf(x,y);
 }
 
 __device__ float my_exp(float x) {
 	if(is_invalid(x)) return CUDART_NAN_F;
-	else return __expf(x);
+	else return expf(x);
 }
 
 __device__ float my_log(float x) {
 	if(x < 0. || is_invalid(x) ) return CUDART_NAN_F;
-	else return __logf(x);
+	else return logf(x);
 }
 
 __device__ float my_gamma(float x) {
 	if(x < 0. ||  is_invalid(x)) return CUDART_NAN_F;
-	else return tgamma(x);
+	else return tgammaf(x);
 }
 
 __device__ float my_sqrt(float x) {
 	if(x < 0. || is_invalid(x)) return CUDART_NAN_F;
-	else return __fsqrt_rz(x);
+	else return sqrtf(x);
 }
 
 __device__ float my_abs(float x) {
 	if(is_invalid(x)) return CUDART_NAN_F;
-	else return abs(x);
+	else return fabsf(x);
 }
 
 __device__ float my_round(float x) {
 	if(is_invalid(x)) return CUDART_NAN_F;
-	else return round(x);
+	else return roundf(x);
 }
 
 __device__ float my_neg(float x) {
@@ -176,22 +178,22 @@ __device__ float my_sgn(float x) {
 
 __device__ float my_add(float x, float y) {
 	if(is_invalid(x) || is_invalid(y) ) return CUDART_NAN_F;
-	else return __fadd_rz(x,y);
+	else return x+y;
 }
 
 __device__ float my_mul(float x, float y) {
 	if(is_invalid(x) || is_invalid(y) ) return CUDART_NAN_F;
-	else return __fmul_rz(x,y);
+	else return x*y;
 }
 
 __device__ float my_div(float x, float y) {
 	if(is_invalid(x) || is_invalid(y) || y==0.0 ) return CUDART_NAN_F;
-	else return __fdiv_rz(x,y);
+	else return x/y;
 }
 
 __device__ float my_sin(float x) {
 	if(is_invalid(x)) return CUDART_NAN_F;
-	else return __sinf(x);
+	else return sinf(x);
 }
 __device__ float my_asin(float x) {
 	if(is_invalid(x)) return CUDART_NAN_F;
@@ -200,7 +202,7 @@ __device__ float my_asin(float x) {
 
 __device__ float my_cos(float x) {
 	if(is_invalid(x)) return CUDART_NAN_F;
-	else return __cosf(x);
+	else return cosf(x);
 }
 __device__ float my_acos(float x) {
 	if(is_invalid(x)) return CUDART_NAN_F;
@@ -209,7 +211,7 @@ __device__ float my_acos(float x) {
 
 __device__ float my_tan(float x) {
 	if(is_invalid(x)) return CUDART_NAN_F;
-	else return __tanf(x);
+	else return tanf(x);
 }
 __device__ float my_atan(float x) {
 	if(is_invalid(x)) return CUDART_NAN_F;

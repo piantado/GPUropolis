@@ -136,10 +136,12 @@ __global__ void MH_constant_kernel(int N, int MCMC_ITERATIONS, int DLEN, datum* 
 	}
 	
 	// And set the properties of current, and return:
+// 	current->posterior = my_pow(-7.589611, 2.0);
 	current->chain_index = idx; 
 	current->acceptance_ratio = float(this_chain_acceptance_count)/float(this_chain_proposals);
 	memcpy( &out_hypotheses[idx], (void*)current, sizeof(hypothesis));
 	
+// 	current_MAP->posterior = my_pow(-7.589611, 2.0);
 	current_MAP->chain_index = idx; 
 	current_MAP->acceptance_ratio = float(this_chain_acceptance_count)/float(this_chain_proposals);
 	memcpy( &out_MAPs[idx], (void*)current_MAP, sizeof(hypothesis));
