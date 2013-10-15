@@ -78,7 +78,7 @@ void dump_to_file(const char* path, hypothesis* ar, int N, int append) {
 		for(int i=0;i<MAX_CONSTANTS;i++) fprintf(fp, "%i ", h->constant_types[i]);
 		fprintf(fp,"\"\t");
 
-		// print out constant types
+		// print out constants
 		fprintf(fp,"\"");
 		for(int i=0;i<MAX_CONSTANTS;i++) fprintf(fp, "%.3f ", h->constants[i]);
 		fprintf(fp,"\"\t");			

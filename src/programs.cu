@@ -308,7 +308,7 @@ void print_program_as_expression(FILE* fp, hypothesis* h) {
 			case ADD_:
 				strcpy(buf, "(");
 				strcat(buf, SS[top]);
-				strcat(buf, ")+(");
+				strcat(buf, "+");
 				strcat(buf, SS[top-1]);
 				strcat(buf, ")");
 				top -= 1;
@@ -318,7 +318,7 @@ void print_program_as_expression(FILE* fp, hypothesis* h) {
 			case SUB_:
 				strcpy(buf, "(");
 				strcat(buf, SS[top]);
-				strcat(buf, ")-(");
+				strcat(buf, "-");
 				strcat(buf, SS[top-1]);
 				strcat(buf, ")");
 				top -= 1;
@@ -328,7 +328,7 @@ void print_program_as_expression(FILE* fp, hypothesis* h) {
 			case MUL_:
 				strcpy(buf, "(");
 				strcat(buf, SS[top]);
-				strcat(buf, ")*(");
+				strcat(buf, "*");
 				strcat(buf, SS[top-1]);
 				strcat(buf, ")");
 				top -= 1;
@@ -338,18 +338,18 @@ void print_program_as_expression(FILE* fp, hypothesis* h) {
 			case DIV_:
 				strcpy(buf, "(");
 				strcat(buf, SS[top]);
-				strcat(buf, ")/(");
+				strcat(buf, "/");
 				strcat(buf, SS[top-1]);
 				strcat(buf, ")");
 				top -= 1;
 				strcpy(SS[top], buf);
 				break;
 			case POW_:
-				strcpy(buf, "((");
+				strcpy(buf, "(");
 				strcat(buf, SS[top]);
-				strcat(buf, ")**(");
+				strcat(buf, "**");
 				strcat(buf, SS[top-1]);
-				strcat(buf, "))");
+				strcat(buf, ")");
 				top -= 1;
 				strcpy(SS[top], buf);
 				break;	

@@ -159,7 +159,7 @@ __device__ float my_exp(float x) {
 __device__ float my_log(float x) {
 	
 	if(is_valid(x) && x>0.0f) {
-		return (float)log(double(x)); //logf(x);
+		return logf(x);
 	}
 	else {
 		return CUDART_NAN_F;
