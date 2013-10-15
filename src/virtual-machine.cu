@@ -14,7 +14,7 @@ __device__ data_t f_output(data_t X, hypothesis* h, data_t* stack) {
 	int constant_i = 0; // index into the constant array, increasing order
 	
 	// We could start at p=0 to avoid branching, but actually here we start at the program length since its faster for short programs
-	for(int p=program_start;p<dMAX_PROGRAM_LENGTH;p++) { // program pointer
+	for(int p=program_start;p<dMAX_PROGRAM_LENGTH;p++) { // program pointer -- IF YOU CHANGE THIS, CHANGE IT IN THE PROGRAM PRINTER TO AVOID CONST WEIRDNESS
 		op_t op = (*pi_ptr);
 		
 		int newtop = top + stack_change(op);

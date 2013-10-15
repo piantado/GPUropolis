@@ -22,8 +22,7 @@ __device__ float compute_likelihood(int DLEN, datum* device_data, hypothesis* h,
 		//__syncthreads(); // NOT a speed improvement
 		
 		float val = f_output( device_data[i].input, h, stack);
-		if(is_invalid(val)) { ll = -1.0/0.0; break; }
-			
+		
 		// compute the difference between the output and what we see
 		data_t d = device_data[i].output - val;
 		
@@ -52,6 +51,11 @@ __device__ float compute_prior(hypothesis* h) {
 	
 	// Compute the constant prior:
 	h->prior += compute_constants_prior(h);
+	
+	// and check that we're not too long (since that leads to problems, apparently even if we are exactly the right length)
+	if(h->program_length >= dMAX_PROGRAM_LENGTH) {
+		h->prior = -1.0f/0.0f;
+	}
 	
 	return h->prior;
 }

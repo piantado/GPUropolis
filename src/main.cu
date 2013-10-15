@@ -51,6 +51,8 @@ int NTOP = 5000; // store this many of the "top" hypotheses (for resampling).
 
 const int BLOCK_SIZE = 128; // WOW 16 appears to be fastest here...
 int N_BLOCKS = 0; // set below
+const int HARDARE_MAX_X_BLOCKS = 1024;
+const int HARDWARE_MAX_THREADS_PER_BLOCK = 1024; // cannot exceed this many threads per block! For compute level 2.x and greater!
 
 string in_file_path = "data.txt"; 
 string OUT_PATH     = "run";
@@ -139,6 +141,10 @@ int main(int argc, char** argv)
 		}
 	
 	N_BLOCKS = N/BLOCK_SIZE + (N%BLOCK_SIZE == 0 ? 0:1);
+	
+	assert(N_BLOCKS < HARDARE_MAX_X_BLOCKS); // can have at most this many blocks
+	assert(N/N_BLOCKS <= HARDWARE_MAX_THREADS_PER_BLOCK); // MUST HAVE LESS THREADS PER BLOCK!!
+	
 	
 	// -----------------------------------------------------------------------
 	// Set up the output files etc
@@ -251,8 +257,8 @@ int main(int argc, char** argv)
 // 	float P_1arg  = P / float(count_args[1]);
 // 	float P_2arg  = P / float(count_args[2]);
 	// This way will put all mass equally among all functions, regardless of arity:
-	float P_1arg  = P * float(count_args[1]) / float(count_args[1] + count_args[2]);
-	float P_2arg  = P * float(count_args[2]) / float(count_args[1] + count_args[2]);;
+	float P_1arg  = P / float(count_args[1] + count_args[2]);
+	float P_2arg  = P / float(count_args[1] + count_args[2]);;
 	
 	for(int i=0;i<MAX_NUM_OPS;i++) hPRIOR[i] = 0.0; // must initialize since not all will be used
 	

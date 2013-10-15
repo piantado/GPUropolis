@@ -93,7 +93,7 @@ __device__ __host__ float ltruncated_geometric(int x, float P, int m){
 	
 	if(x < m)     return log(P) * x + log(P-1); // standard geometric
 	else if(x==m) return log(P) * m; // truncation
-	else          return -1.0/0.0;
+	else          return -1.0f/0.0f;
 }
 
 
@@ -102,7 +102,7 @@ __device__ __host__ float ltruncated_geometric(int x, float P, int m){
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 __device__ __host__ float lexponentialpdf(float x, float r) {
-	if(x < 0){ return -1.0/0.0; }
+	if(x < 0.0f){ return -1.0f/0.0f; }
 	return log(r) - r*x;
 }
 
@@ -112,47 +112,71 @@ __device__ __host__ float lnormalpdf( float x, float s ){
 
 // log  log-normal
 __device__ __host__ float llnormalpdf(float x, float s) {
-	if(x <= 0) { return -1.0/0.0; }
+	if(x <= 0) { return -1.0f/0.0f; }
 	return lnormalpdf( log(x), s) - log(x);
 }
 
 __device__ __host__ float luniformpdf( float x ){
-	if(x<0 || x>1){ return -1.0/0.0; }
-	return 0.0;
+	if(x<0.0f || x>1.0f){ return -1.0f/0.0f; }
+	return 0.0f;
 }
 
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // My versions of primitives
-// NOTE: USE OF BUILT-IN PRIMITIVES GAVE ME WEIRDO RESULTS!
+// Here, we use the full precision (powf instead of __powf) BUT we use the fast_math flag in the Makefile to 
+// compile these to faster versions
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 
 __device__ float my_pow(float x, float y) {
-	if(x < 0. || is_invalid(x) || is_invalid(y)) return CUDART_NAN_F;
-	if(x==0.0) return 0.0;
-	
-	return exp(y * log(x));
-// 	return powf(x,y);
+	// 	
+// 	// HMM CUDA: if I write this as this, it doesn't work and I get assertion failures
+// // 	if(x<0.0f) return CUDART_NAN_F;
+// 	assert(x>=0.0f); // THIS FAILS WTF
+// 	return powf(x,y);	
+// 	// is this something to do with thread divergence?
+// 	
+// 	// Like this, it seems to go okay. Why?? CUDA, please explain!
+	if(x>=0.0f && is_valid(x) && is_valid(y) ){
+		assert(x>=0.0f);
+		return powf(x,y);
+	}
+	else {
+		return CUDART_NAN_F;
+	}
 }
 
 __device__ float my_exp(float x) {
-	if(is_invalid(x)) return CUDART_NAN_F;
-	else return expf(x);
+	if(is_valid(x)){
+		return expf(x);
+	}
+	else {
+		return CUDART_NAN_F;
+	}
 }
 
 __device__ float my_log(float x) {
-	if(x < 0. || is_invalid(x) ) return CUDART_NAN_F;
-	else return logf(x);
+	
+	if(is_valid(x) && x>0.0f) {
+		return (float)log(double(x)); //logf(x);
+	}
+	else {
+		return CUDART_NAN_F;
+	}
 }
 
 __device__ float my_gamma(float x) {
-	if(x < 0. ||  is_invalid(x)) return CUDART_NAN_F;
-	else return tgammaf(x);
+	if(x > 0.0 && is_valid(x)) {
+		return tgammaf(x);
+	}
+	else {
+		return CUDART_NAN_F;
+	}
 }
 
 __device__ float my_sqrt(float x) {
-	if(x < 0. || is_invalid(x)) return CUDART_NAN_F;
+	if(x < 0.0f || is_invalid(x)) return CUDART_NAN_F;
 	else return sqrtf(x);
 }
 
@@ -173,7 +197,7 @@ __device__ float my_neg(float x) {
 
 __device__ float my_sgn(float x) {
 	if(is_invalid(x)) return CUDART_NAN_F;
-	else return (x>0.)-(x<0.);
+	else return (x>0.0f)-(x<0.0f);
 }
 
 __device__ float my_add(float x, float y) {
@@ -187,7 +211,7 @@ __device__ float my_mul(float x, float y) {
 }
 
 __device__ float my_div(float x, float y) {
-	if(is_invalid(x) || is_invalid(y) || y==0.0 ) return CUDART_NAN_F;
+	if(is_invalid(x) || is_invalid(y) || y==0.0f ) return CUDART_NAN_F;
 	else return x/y;
 }
 

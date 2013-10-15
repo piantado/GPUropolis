@@ -48,8 +48,11 @@ xs = numpy.array(xs)
 ys = numpy.array(ys)
 sds = numpy.array(sds)
 
-if len(xs) == 0: newx = []
-else:            newx = numpy.arange(0.99*min(xs), max(xs)*1.01, (1.01*max(xs)-0.99*min(xs))/float(NCURVEPTS))
+# TODO: Oh my god, we have to include the original x because it may matter for 
+# fractional data points!! If we don't, then sometimes hypotehses fail to evaluate because
+# the hypotheses have fractional powers that are not defined for fractional data.
+# This was fixed most recently by disallowing negative fractional powers, but we may want to change that in the future...
+newx = numpy.arange(0.99*min(xs), max(xs)*1.01, (1.01*max(xs)-0.99*min(xs))/float(NCURVEPTS))
 
 
 ## --------------------------------------
@@ -121,7 +124,7 @@ for method in ['lpZ', 'maxratio', 'count', 'one']:
 	for h in sorted(H2cnt.keys(), key=lambda x: H2post[x][0]):
 		
 		if method == 'count':      p = log(H2cnt[h]+1) / log(Zcnt + len(H2cnt.keys()) ) # color on log scale
-		elif method == 'one':      p = 0.01
+		elif method == 'one':      p = min(1.0, 10.0 / len(H2cnt.keys()))
 		elif method == 'lpZ':      p = exp(H2post[h][0] - Z)
 		elif method == 'maxratio': p = exp(H2post[h][0] - Zmax)
 		print method, p, h
@@ -129,16 +132,14 @@ for method in ['lpZ', 'maxratio', 'count', 'one']:
 		if p < MIN_PLOT: continue
 		
 		plotx, ploty = failmap(H2f[h], newx)
-		#print plotx, ploty
+		
 		## Hmm check here that we can get some values!
-		if not any([ v is not None for v in ploty]): 
+		if len(ploty)==0:
 			print "Failed to compute any valid value! Aborting! %s" % h
 			continue
-		#assert any([ v is not None for v in newy]), "Failed to compute a valid value! Aborting! %s" % h
 		
 		try: 
 			plt.plot(plotx, ploty, alpha=p, color="gray", zorder=1)
-			#print newx, newy
 			#print "Plotted!"
 		except OverflowError: pass
 		except ValueError: pass

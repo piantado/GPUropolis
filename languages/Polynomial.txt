@@ -1,5 +1,5 @@
 # Name, NumberOfArgs, Stack operation (in CUDA/C)
-ONE	0	1.0
+ONE	0	1.0f
 X	0	X
 NEG	1	my_neg(stack[top])
 ADD	2	my_add(stack[top], stack[top-1])

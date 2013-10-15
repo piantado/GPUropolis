@@ -38,7 +38,7 @@ vector<datum>* load_data_file(const char* datapath, int FIRST_HALF_DATA, int EVE
 			d->push_back( (datum){.input=(data_t)x, .output=(data_t)y, .sd=(data_t)sd} );
 		}
 		else {
-			cerr << "*** ERROR IN INPUT\t" << line << endl;
+			cerr << "*** ERROR IN PARSING INPUT\t" << line << endl;
 			exit(1);
 		}
 	}

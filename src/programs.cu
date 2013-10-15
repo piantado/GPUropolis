@@ -286,11 +286,12 @@ void print_program_as_expression(FILE* fp, hypothesis* h) {
 	
 	int top = MAX_MAX_PROGRAM_LENGTH; // top of the stack
 	int constant_i = 0; // what constant are we pointing at?
+	int program_start = hMAX_PROGRAM_LENGTH-h->program_length;
 	
 	// re-initialize our buffer
 	for(int r=0;r<MAX_MAX_PROGRAM_LENGTH*2;r++) strcpy(SS[r], "0"); // since everything initializes to 0
 	
-	for(int p=0;p<hMAX_PROGRAM_LENGTH;p++) {
+	for(int p=program_start;p<hMAX_PROGRAM_LENGTH;p++) { // NEED to start at the same place as virtual-machine (either 0 or program_start), or else consts can get out of sync!
 		op_t op = h->program[p];
 		
 		switch(op) {
@@ -353,17 +354,15 @@ void print_program_as_expression(FILE* fp, hypothesis* h) {
 				strcpy(SS[top], buf);
 				break;	
 			case NEG_:
-				strcpy(buf, "-");
+				strcpy(buf, "(-");
 				strcat(buf, SS[top]);
-				strcat(buf, "");
+				strcat(buf, ")");
 				strcpy(SS[top], buf);
 				break;
 			case CONSTANT_:
-				top += 1;
-				// AHHA, if we specify number of digits, we may round to 0, 
-				// which can go VERY bad for python later!
-				sprintf(SS[top],"%f",h->constants[constant_i]);
-				constant_i++;
+				top += 1;			
+				sprintf(SS[top],"%f",  (constant_i < MAX_CONSTANTS) * h->constants[constant_i]);
+				constant_i += (constant_i < MAX_CONSTANTS);
 				break;
 			default: // Defaultly just use the name
 				strcpy(buf, NAMES[op]);

@@ -102,6 +102,7 @@ def failmap(f, xs):
 	return newx, ys	
 
 def smartrange(v, sds=0.0, pad=1.1):
+	
 	if(len(v)==0): return [-1,1]
 		
 	r = max(v+sds)-min(v-sds)

@@ -58,14 +58,14 @@ __global__ void MH_constant_kernel(int N, int MCMC_ITERATIONS, int DLEN, datum* 
 				
 				// a full proposal from the prior (to extract us from local max)
 				random_closed_expression(proposal, RNG_ARGS);
-				update_hypothesis(proposal);
+				update_hypothesis(proposal); // sets the number of constants
 				
 				// and set the constants to new random values
-				// do this reversibly!
+				// and compute fb!
 				for(int k=0;k<proposal->nconstants;k++) {
 					float old_val = proposal->constants[k];
 					float new_val = random_normal(RNG_ARGS);
-					fb = lnormalpdf(new_val,1.0) - lnormalpdf(old_val, 1.0);
+					fb += lnormalpdf(new_val,1.0) - lnormalpdf(old_val, 1.0);
 					
 					proposal->constants[k] = new_val;
 					proposal->constant_types[k] = random_int(__N_CONSTANT_TYPES, RNG_ARGS);
@@ -114,7 +114,7 @@ __global__ void MH_constant_kernel(int N, int MCMC_ITERATIONS, int DLEN, datum* 
 			this_chain_proposals += 1; // how many total proposals have we made?
 						
 			// compute whether not we accept the proposal, while rejecting infs and nans
-			int swap = (random_float(RNG_ARGS) < exp( (proposal->prior + proposal->likelihood - current->prior - current->likelihood - fb) )) && is_valid(proposal->posterior) || !is_valid(current->posterior);
+			int swap = random_float(RNG_ARGS) < exp( proposal->posterior - current->posterior - fb) && is_valid(proposal->posterior);
 			
 			// swap if we should
 			if(swap) {
@@ -127,7 +127,7 @@ __global__ void MH_constant_kernel(int N, int MCMC_ITERATIONS, int DLEN, datum* 
 				this_chain_acceptance_count += 1;
 				
 				// and update the MAP if we should
-				if(current->posterior > current_MAP->posterior || !is_valid(current_MAP->posterior)){
+				if(current->posterior > current_MAP->posterior || is_invalid(current_MAP->posterior)){
 					memcpy((void*)current_MAP, (void*)current, sizeof(hypothesis));
 				}
 			} // end if swap
@@ -136,7 +136,7 @@ __global__ void MH_constant_kernel(int N, int MCMC_ITERATIONS, int DLEN, datum* 
 	}
 	
 	// And set the properties of current, and return:
-// 	current->posterior = my_pow(-7.589611, 2.0);
+// 	current->posterior = my_pow(-7.589611, 2.3);
 	current->chain_index = idx; 
 	current->acceptance_ratio = float(this_chain_acceptance_count)/float(this_chain_proposals);
 	memcpy( &out_hypotheses[idx], (void*)current, sizeof(hypothesis));
