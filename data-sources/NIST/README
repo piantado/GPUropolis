@@ -1,0 +1,7 @@
+These are included files from the NIST database of nonlinear function fitting, including (for now) only the "hard" equations. This data set is intended for fitting parameters. Here, we can try to learn the form of the equations. 
+
+In all data sets, the residual stddev is assumed as the noise on each data point. 
+
+This is a government data set, but it is not clear what license it can be distributed under. 
+
+http://www.itl.nist.gov/div898/strd/nls/nls_main.shtml
