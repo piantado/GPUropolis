@@ -10,7 +10,7 @@
 // here all hypotheses are allocated the maximum amount of memory
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-const int      MAX_MAX_PROGRAM_LENGTH = 100; // the most this could ever be. 
+const int      MAX_MAX_PROGRAM_LENGTH = 50; // the most this could ever be. 
 int            hMAX_PROGRAM_LENGTH = 25; // on the hostA
 __device__ int dMAX_PROGRAM_LENGTH = 25; // on the device
 

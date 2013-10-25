@@ -34,8 +34,14 @@ vector<datum>* load_data_file(const char* datapath, int FIRST_HALF_DATA, int EVE
 	char* line = NULL; size_t len=0; float x,y,sd; 
 	while( getline(&line, &len, fp) != -1) {
 		if( line[0] == '#' ) continue;  // skip comments
-		else if (sscanf(line, "%f\t%f\t%f\n", &x, &y, &sd) == 3) { 
+		else if (sscanf(line, "%f\t%f\t%f\n", &x, &y, &sd) == 3) { // floats
 			d->push_back( (datum){.input=(data_t)x, .output=(data_t)y, .sd=(data_t)sd} );
+		}
+		else if (sscanf(line, "%e\t%e\t%e\n", &x, &y, &sd) == 3) { // scientific notation
+			d->push_back( (datum){.input=(data_t)x, .output=(data_t)y, .sd=(data_t)sd} );
+		}
+		else if ( strspn(line, " \r\n\t") == strlen(line) ) { // skip whitespace
+			continue;
 		}
 		else {
 			cerr << "*** ERROR IN PARSING INPUT\t" << line << endl;
@@ -52,10 +58,15 @@ vector<datum>* load_data_file(const char* datapath, int FIRST_HALF_DATA, int EVE
 		}
 	}
 	if(EVEN_HALF_DATA) {
-		for(int i=d->size()-1;i>=0;i-=2) {
+		for(int i=d->size()-(1-d->size()%2)-1;i>=0;i-=2) {
 			d->erase(d->begin()+i);
 		}
 	}
 		
 	return d;
 }
+
+
+
+
+

@@ -100,6 +100,7 @@ static struct option long_options[] =
 		{"burn",         required_argument,    NULL, 'b'},
 		{"first-half",   no_argument,    NULL, 'f'},
 		{"even-half",    no_argument,    NULL, 'e'},
+		{"all",    no_argument,    NULL, '_'},
 		{NULL, 0, 0, 0} // zero row for bad arguments
 	};  
 
@@ -131,6 +132,7 @@ int main(int argc, char** argv)
 			case 'e': EVEN_HALF_DATA = 1; break;
 			case 'p': PROPOSAL = atoi(optarg); break;
 			case 'L': set_MAX_PROGRAM_LENGTH(atoi(optarg)); break;
+			case '_': break; // don't do anything if we use all the data
 			case 'h': // help output:
 // 				cout << "Options: " << endl;
 // 				cout << "\t--max-base=N         sets the maximum base to N" << endl;
@@ -196,28 +198,6 @@ int main(int argc, char** argv)
 	fprintf(fp, "block\tperfect.ll\tMAP.ll\tdevice.time\ttransfer.time\thost.time\tsamples.per.second\tf.per.second\tprimitives.per.second\ttransfer.mb.per.second\n");
 	fclose(fp);
 	
-	// -----------------------------------------------------------------------
-	// Read the data and set up some arrays
-	// -----------------------------------------------------------------------
-	
-	vector<datum>* data_vec = load_data_file(in_file_path.c_str(), FIRST_HALF_DATA, EVEN_HALF_DATA);
-	datum* host_data = &((*data_vec)[0]); // can do this with vectors now
-	
-	const int DLEN = data_vec->size();
-	const size_t DATA_BYTE_LEN = DLEN*sizeof(datum);
-
-	// compute the maximum possible ll
-	// we use this for the start of annealing temperature
-	double PERFECT_LL = 0.0;
-	for(int di=0;di<DLEN;di++) {PERFECT_LL += lnormalpdf( 0.0, host_data[di].sd); }
-	
-	// Echo the run data if we want:
-// 	for(int i=0;i<DLEN;i++)	printf("# %4.4f\t%4.4f\t%4.4f\n", host_data[i].input, host_data[i].output, host_data[i].sd);
-	
-	// and put this on the GPU
-	datum* device_data; 
-	cudaMalloc((void **) &device_data, DATA_BYTE_LEN);
-	cudaMemcpy(device_data, host_data, DATA_BYTE_LEN, cudaMemcpyHostToDevice);
 	
 	// -----------------------------------------------------------------------
 	// Set up the prior
@@ -289,6 +269,35 @@ int main(int argc, char** argv)
 		fprintf(fp, "\t%i\t%s\t%f\n", i, NAMES[i], hPRIOR[i]);
 	fclose(fp);
 
+	// -----------------------------------------------------------------------
+	// Read the data and set up some arrays
+	// -----------------------------------------------------------------------
+	
+	vector<datum>* data_vec = load_data_file(in_file_path.c_str(), FIRST_HALF_DATA, EVEN_HALF_DATA);
+	datum* host_data = &((*data_vec)[0]); // can do this with vectors now
+	
+	const int DLEN = data_vec->size();
+	const size_t DATA_BYTE_LEN = DLEN*sizeof(datum);
+
+	// compute the maximum possible ll
+	// we use this for the start of annealing temperature
+	double PERFECT_LL = 0.0;
+	for(int di=0;di<DLEN;di++) {PERFECT_LL += lnormalpdf( 0.0, host_data[di].sd); }
+
+	// and put this on the GPU
+	datum* device_data; 
+	cudaMalloc((void **) &device_data, DATA_BYTE_LEN);
+	cudaMemcpy(device_data, host_data, DATA_BYTE_LEN, cudaMemcpyHostToDevice);
+	
+	// Echo the data we actually run with (post-filtering for even/firsthalf)
+	fp = fopen(LOG_PATH.c_str(), "a");
+	fprintf(fp, "\n-----------------------------------------------------------------\n");
+	fprintf(fp, "-- Data:\n");
+	fprintf(fp, "-----------------------------------------------------------------\n");
+	for(int i=0;i<DLEN;i++) 
+		fprintf(fp, "\t%f\t%f\t%f\n", host_data[i].input, host_data[i].output, host_data[i].sd);
+	fclose(fp);
+	
 	// -----------------------------------------------------------------------
 	// Set up some bits...
 	// -----------------------------------------------------------------------
