@@ -1,6 +1,8 @@
 
 import re
 import numpy
+import scipy
+import scipy.stats
 
 import sympy
 from sympy import init_printing, Symbol, expand
@@ -180,7 +182,7 @@ def power(x,y):
 def failmap(f, xs):
 	# A better mapping that deals with some failures
 	ys = []
-	newx = []
+	mynewx = []
 	for x in xs:
 		y = None
 		try: 
@@ -189,10 +191,10 @@ def failmap(f, xs):
 		
 		if y is not None and not isinf(y) and not isnan(y): 
 			ys.append(y)
-			newx.append(x)
+			mynewx.append(x)
 		
 		
-	return newx, ys	
+	return mynewx, ys	
 
 def smartrange(v, sds=0.0, pad=1.1):
 	
@@ -201,3 +203,8 @@ def smartrange(v, sds=0.0, pad=1.1):
 	r = max(v+sds)-min(v-sds)
 	padr = pad * r
 	return min(v-sds)-(padr-r)/2., max(v+sds)+(padr-r)/2.
+
+def data_ll(x,y,sd):
+	return numpy.sum( scipy.stats.norm.logpdf( numpy.abs(x - y)/sd))
+
+	
