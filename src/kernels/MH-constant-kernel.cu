@@ -50,7 +50,7 @@ __global__ void MH_constant_kernel(int N, int MCMC_ITERATIONS, int DLEN, datum* 
 	
 	// Now main MCMC iterations	
 	for(int mcmci=0;mcmci<MCMC_ITERATIONS;mcmci++) {
-		for(int pp=0;pp<=3;pp++) { // for each kind of proposal
+		for(int pp=1;pp<=3;pp++) { // for each kind of proposal -- NOTE: WE NOW SKIP THE CONST
 			
 			float fb = 0.0;  // the forward-backward probability
 			

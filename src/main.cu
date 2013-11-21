@@ -24,7 +24,7 @@ const float X_PENALTY = 10.0; // penalty for using X
 // in tree resampling, the expected length here is important in getting a good acceptance rate -- too low
 // (meaning too long) and we will reject almost everything
 const float EXPECTED_LENGTH = 3.0; // also the expected length of proposals
-const float PRIOR_XtoCONSTANT = 0.1; //what proportion of constant proposals are x (as opposed to all other constants)?
+const float PRIOR_XtoCONSTANT = 0.001; //what proportion of constant proposals are x (as opposed to all other constants)?
 
 const double RESAMPLE_PRIOR_TEMPERATURE = 1000.0; // when we resample, what temperatures do we use?
 const double RESAMPLE_LIKELIHOOD_TEMPERATURE = 1000.0; 
@@ -34,15 +34,18 @@ const double RESAMPLE_LIKELIHOOD_TEMPERATURE = 1000.0;
 #include "src/data.cu"
 #include "src/hypothesis.cu"
 #include "src/programs.cu"
+#include "src/mcmc-specification.cu"
+#include "src/mcmc-results.cu"
 #include "src/bayes.cu"
 #include "src/virtual-machine.cu"
 #include "src/hypothesis-array.cu"
-#include "src/kernels/MH-kernel.cu"
-#include "src/kernels/MH-constant-kernel.cu"
-#include "src/kernels/MH-weighted-kernel.cu"
-#include "src/kernels/prior-kernel.cu"
-#include "src/kernels/search-kernel.cu"
-#include "src/kernels/MH-adaptive-anneal.cu"
+// #include "src/kernels/MH-kernel.cu"
+// #include "src/kernels/MH-constant-kernel.cu"
+// #include "src/kernels/MH-weighted-kernel.cu"
+#include "src/kernels/MH-simple-kernel.cu"
+// #include "src/kernels/prior-kernel.cu"
+// #include "src/kernels/search-kernel.cu"
+// #include "src/kernels/MH-adaptive-anneal.cu"
 
 using namespace std;
 
@@ -190,14 +193,15 @@ int main(int argc, char** argv)
 	fprintf(fp, "\tEnd of block action: %i\n", END_OF_BLOCK_ACTION);
 	fprintf(fp, "\tProposal: %i\n", PROPOSAL);
 	fprintf(fp, "\tMax program length: %i\n", hMAX_PROGRAM_LENGTH);
+	fprintf(fp, "\tX to constant proportion: %f\n", PRIOR_XtoCONSTANT);
+	
 	fprintf(fp, "\n\n");
 	fclose(fp);
 	
 	fp = fopen(PERFORMANCE_PATH.c_str(), "w");
 	if(fp==NULL) { cerr << "*** ERROR: Cannot open file:\t" << PERFORMANCE_PATH <<"\n"; exit(1);}
-	fprintf(fp, "block\tperfect.ll\tMAP.ll\tdevice.time\ttransfer.time\thost.time\tsamples.per.second\tf.per.second\tprimitives.per.second\ttransfer.mb.per.second\n");
+	fprintf(fp, "block\tperfect.ll\tMAP.ll\tdevice.time\ttransfer.time\thost.time\tsamples.per.second\tf.per.second\tprimitives.per.second\ttransfer.mb.per.second\tacceptance.ratio\n");
 	fclose(fp);
-	
 	
 	// -----------------------------------------------------------------------
 	// Set up the prior
@@ -299,43 +303,66 @@ int main(int argc, char** argv)
 	fclose(fp);
 	
 	// -----------------------------------------------------------------------
-	// Set up some bits...
-	// -----------------------------------------------------------------------
-	
-	size_t HYPOTHESIS_ARRAY_SIZE = N * sizeof(hypothesis);
-	hypothesis* host_hypotheses = new hypothesis[N]; 
-	hypothesis* device_hypotheses; cudaMalloc((void **) &device_hypotheses, HYPOTHESIS_ARRAY_SIZE); // device allocate
-
-	hypothesis* host_hypothesis_tmp = new hypothesis[N]; 
-	
-	hypothesis* host_out_MAPs = new hypothesis[N];
-	hypothesis* device_out_MAPs; cudaMalloc((void **) &device_out_MAPs, HYPOTHESIS_ARRAY_SIZE); // device allocate
-	
-	// -----------------------------------------------------------------------
-	// Initialize our hypotheses
+	// Initialize RNG
 	// -----------------------------------------------------------------------
 	
 	// define random numbers:
 	int rx,ry,rz,rw;
 	rx = rand(); ry = rand(); rz = rand(); rw = rand();
 	
+	// -----------------------------------------------------------------------
+	// Set up some bits...
+	// -----------------------------------------------------------------------
+	
+	// For locally manipulating hypotheses
+	size_t HYPOTHESIS_ARRAY_SIZE = N * sizeof(hypothesis);
+	hypothesis* host_hypotheses = new hypothesis[N]; 
+	hypothesis* host_hypothesis_tmp = new hypothesis[N]; 
+	hypothesis* host_out_MAPs = new hypothesis[N];
+	
+	int MCMC_RESULTS_SIZE = sizeof(mcmc_results)*N;
+	mcmc_results* host_mcmc_results = new mcmc_results[N];
+	mcmc_results* device_mcmc_results; cudaMalloc((void **) &device_mcmc_results, MCMC_RESULTS_SIZE); // device allocate
+	
 	// initialize this local array (copied to CUDA after any further changes)
 	for(int n=0;n<N;n++){
-		initialize(&host_hypotheses[n], RNG_ARGS);
-		initialize(&host_out_MAPs[n], RNG_ARGS);
-		initialize(&host_hypothesis_tmp[n], RNG_ARGS);
+		initialize(&(host_mcmc_results[n].MAP),    RNG_ARGS);
+		initialize(&(host_mcmc_results[n].sample), RNG_ARGS);
 	}
-
+	
+	// and copy these to device
+	cudaMemcpy(device_mcmc_results, host_mcmc_results, MCMC_RESULTS_SIZE, cudaMemcpyHostToDevice);
+	
 	// store the top hypotheses overall
-	hypothesis* host_top_hypotheses = new hypothesis[NTOP+2*N]; // store NTOP plus 2N so we can store the samples and tops on the end, then remove duplicates
+	hypothesis* host_top_hypotheses = new hypothesis[NTOP+2*N]; 
 	for(int i=0;i<NTOP+2*N;i++) initialize(&host_top_hypotheses[i], RNG_ARGS);
 	
 	// a special guy we keep  empty
-	hypothesis blankhyp; 
-	initialize(&blankhyp, RNG_ARGS);
-		
-	// and copy these to device
-	cudaMemcpy(device_hypotheses, host_hypotheses, HYPOTHESIS_ARRAY_SIZE, cudaMemcpyHostToDevice);
+	hypothesis blankhyp; initialize(&blankhyp, RNG_ARGS);
+	
+	// -----------------------------------------------------------------------
+	// Make the specification for mcmc steps, iterations, etc.
+	// -----------------------------------------------------------------------
+	
+	int NSPECSIZE = N*sizeof(mcmc_specification);
+	
+	mcmc_specification* host_spec = new mcmc_specification[N]; 
+	mcmc_specification* dev_spec; cudaMalloc((void **) &dev_spec, NSPECSIZE ); // device allocate
+
+	
+	// And set up the specifications!
+	for(int i=0;i<N;i++) {
+		host_spec[i].prior_temperature = 1.0;
+		host_spec[i].likelihood_temperature = 1.0;
+		host_spec[i].acceptance_temperature = 1.0;
+		host_spec[i].iterations = MCMC_ITERATIONS; // how many steps to run?
+		host_spec[i].initialize = 1;
+		host_spec[i].rng_seed = rand();
+		host_spec[i].data_length = DLEN;
+		host_spec[i].data = device_data;
+		// TODO: Max program length should be in here! But that's hard, unless that's also a feature of hyp...
+	}
+	
 	
 	// -----------------------------------------------------------------------
 	// Main loop
@@ -349,30 +376,34 @@ int main(int argc, char** argv)
 		// increase the max program length, as a form of tempering...
 		// set_MAX_PROGRAM_LENGTH(min(outer,MAX_MAX_PROGRAM_LENGTH));
 		
-		// -----------------------------------------------------------------------------------------------------
-		// Run
-				
-		// decide on the LL temperature we'll run on
-// 		double thetemp = PERFECT_LL;
-// 		if(outer > 0 and is_valid(host_top_hypotheses[0].likelihood) ) thetemp = -host_top_hypotheses[0].likelihood;
+		// Set the specifications
+		for(int i=0;i<N;i++) {
+			host_spec[i].initialize = (outer==0)||(END_OF_BLOCK_ACTION==1);
+			host_spec[i].rng_seed = rand(); // set this guy's seed
+		}
+		cudaMemcpy(dev_spec, host_spec, NSPECSIZE, cudaMemcpyHostToDevice);
 		
+		//////////////// Now run: //////////////// 
 		mytimer = clock();
-		MH_constant_kernel<<<N_BLOCKS,BLOCK_SIZE>>>(N, MCMC_ITERATIONS, DLEN, device_data, device_hypotheses, device_out_MAPs, seed+N*outer,  (outer==0)||(END_OF_BLOCK_ACTION==1) );
-
-// 		MH_weighted_kernel<<<N_BLOCKS,BLOCK_SIZE>>>(N, MCMC_ITERATIONS, DLEN, device_data, device_hypotheses, device_out_MAPs, seed+N*outer,  (outer==0)||(END_OF_BLOCK_ACTION==1) );
-// 		MH_kernel<<<N_BLOCKS,BLOCK_SIZE>>>(N, PROPOSAL, MCMC_ITERATIONS, thetemp, DLEN, device_data, device_hypotheses, device_out_MAPs, seed+N*outer,  (outer==0)||(END_OF_BLOCK_ACTION==1) );
 		
-		
+		cudaDeviceSynchronize(); 
+		MH_simple_kernel<<<N_BLOCKS,BLOCK_SIZE>>>(N, dev_spec, device_mcmc_results);
 		cudaDeviceSynchronize(); // wait for preceedings requests to finish
+		
 		secDEVICE = double(clock() - mytimer) / CLOCKS_PER_SEC;
 		
 		// Retrieve result from device and store it in host array
 		mytimer = clock();
-		cudaMemcpy(host_hypotheses, device_hypotheses, HYPOTHESIS_ARRAY_SIZE, cudaMemcpyDeviceToHost);
-		cudaMemcpy(host_out_MAPs,   device_out_MAPs,   HYPOTHESIS_ARRAY_SIZE, cudaMemcpyDeviceToHost);
+		cudaMemcpy(host_mcmc_results, device_mcmc_results, MCMC_RESULTS_SIZE, cudaMemcpyDeviceToHost);
 		secTRANSFER = double(clock() - mytimer) / CLOCKS_PER_SEC;
 		
-		mytimer = clock(); // for host timing
+		mytimer = clock(); // for timing the rest of host operations
+		
+		// and copy the host hypotheses over to hosts and maps
+		for(int i=0;i<N;i++){ 
+			COPY_HYPOTHESIS( &host_hypotheses[i], &(host_mcmc_results[i].sample));
+			COPY_HYPOTHESIS( &host_out_MAPs[i],   &(host_mcmc_results[i].MAP));
+		}		
 		
 		// sort them as required below
 		qsort( (void*)host_out_MAPs,   N, sizeof(hypothesis), hypothesis_posterior_compare);
@@ -405,24 +436,12 @@ int main(int argc, char** argv)
 		
 		memcpy( (void*)&host_top_hypotheses[NTOP], (void*)host_out_MAPs, HYPOTHESIS_ARRAY_SIZE); // put these at the end
 		memcpy( (void*)&host_top_hypotheses[NTOP+N], (void*)host_hypotheses, HYPOTHESIS_ARRAY_SIZE); // put these at the end
- 		qsort(  (void*)host_top_hypotheses, NTOP+2*N, sizeof(hypothesis), sort_bestfirst_unique); // resort, best first, putting duplicate programs next to each other
 		
+		
+		// resort, best first, putting duplicate programs next to each other
+ 		qsort(  (void*)host_top_hypotheses, NTOP+2*N, sizeof(hypothesis), sort_bestfirst_unique); 
 		// and now delete duplicates
-		for(int i=0,j=0;i<NTOP;i++,j++) {
-			if(j<NTOP+2*N) {
-				// skip forward over everything identical
-				// NOTE: BECAUSE we do hypothesis_structurally_identical, we only store the top of each structure
-				// ignoring the differences in constants!
-				while(j+1 < NTOP+2*N && hypothesis_structurally_identical(&host_top_hypotheses[j], &host_top_hypotheses[j+1]))
-					j++;
-				
-				if(j!=i) memcpy( (void*)&host_top_hypotheses[i], &host_top_hypotheses[j], sizeof(hypothesis));
-			}
-			else { // out of hyppotheses, so pad with blankhyp
-				memcpy( (void*)&host_top_hypotheses[i], &blankhyp, sizeof(hypothesis));
-				
-			}
-		}
+		delete_duplicates(host_top_hypotheses, NTOP, NTOP+2*N, &blankhyp);
 		// and save this
 		dump_to_file(TOP_PATH.c_str(), host_top_hypotheses, NTOP, 0);
 				
@@ -430,11 +449,13 @@ int main(int argc, char** argv)
 		// Now how to handle the end of a "block" -- what update do we do?
 		
 		if(END_OF_BLOCK_ACTION == 1) {
-			// Then we just regenerate. This happens above by passing the last variable to device_run
+			// Then we just regenerate. This happens above by updating host_spec above
 		}
 		else if(END_OF_BLOCK_ACTION == 2) {
 			// Then we do nothing. Continue the same chain
 		}
+		
+		// ALL OF THIS CODE USES device_hypotheses, which is now obsolete (replaced with mcmc samples)
 		else if(END_OF_BLOCK_ACTION == 3) {
 			
 			// host_hypotheses already sorted to be best-last
@@ -442,9 +463,9 @@ int main(int argc, char** argv)
 			// Resample from the current chain
 			multinomial_sample(N, host_hypothesis_tmp, host_hypotheses, N, RESAMPLE_PRIOR_TEMPERATURE, RESAMPLE_LIKELIHOOD_TEMPERATURE);
 			
-// 			memcpy(host_hypotheses, host_hypothesis_tmp, HYPOTHESIS_ARRAY_SIZE); // probably not necessary
-			// Since we modified, copy back to the device arrays
-			cudaMemcpy(device_hypotheses, host_hypothesis_tmp, HYPOTHESIS_ARRAY_SIZE, cudaMemcpyHostToDevice);
+			// copy and copy
+			for(int i=0;i<N;i++) COPY_HYPOTHESIS( &host_mcmc_results[i].sample, &host_hypothesis_tmp[i]);
+			cudaMemcpy(device_mcmc_results, host_mcmc_results, MCMC_RESULTS_SIZE, cudaMemcpyHostToDevice);
 		}
 		else if(END_OF_BLOCK_ACTION == 4) {
 		
@@ -454,8 +475,9 @@ int main(int argc, char** argv)
 			// resample from the top!
 			multinomial_sample(N, host_hypothesis_tmp, host_top_hypotheses, NTOP, RESAMPLE_PRIOR_TEMPERATURE, RESAMPLE_LIKELIHOOD_TEMPERATURE);
 		
-			// Since we modified, copy back to the device array
-			cudaMemcpy(device_hypotheses, host_hypothesis_tmp, HYPOTHESIS_ARRAY_SIZE, cudaMemcpyHostToDevice);
+			// copy and copy
+			for(int i=0;i<N;i++) COPY_HYPOTHESIS( &host_mcmc_results[i].sample, &host_hypothesis_tmp[i]);
+			cudaMemcpy(device_mcmc_results, host_mcmc_results, MCMC_RESULTS_SIZE, cudaMemcpyHostToDevice);
 		}
 		
 		secHOST = double(clock() - mytimer) / CLOCKS_PER_SEC;
@@ -468,8 +490,13 @@ int main(int argc, char** argv)
 		unsigned long total_primitives = 0; // count up *approximately* how many primitives were evaluated
 		for(int i=0;i<N;i++) total_primitives += host_hypotheses[i].program_length;
 		
+		double AR_mean=0.0; // get the accept/reject mean
+		for(int i=0;i<N;i++) 
+			AR_mean += float(host_mcmc_results[i].acceptance_count) / float(host_mcmc_results[i].proposal_count);
+		AR_mean /= float(N);
+		
 		FILE* fp = fopen(PERFORMANCE_PATH.c_str(), "a");
-		fprintf(fp, "%i\t%.2f\t%.2f\t%.6f\t%.6f\t%.6f\t%.2f\t%.2f\t%.2f\t%.2f\n",
+		fprintf(fp, "%i\t%.2f\t%.2f\t%.6f\t%.6f\t%.6f\t%.2f\t%.2f\t%.2f\t%.2f\t%.5f\n",
 			outer, 
 			PERFECT_LL,
 			host_top_hypotheses[0].likelihood, 
@@ -479,7 +506,9 @@ int main(int argc, char** argv)
 			double(N)*double(MCMC_ITERATIONS)*double(__builtin_popcount(PROPOSAL))/ secTOTAL,
 			double(N)*double(MCMC_ITERATIONS)*double(DLEN)*double(__builtin_popcount(PROPOSAL))/secTOTAL,
 			double(MCMC_ITERATIONS)*double(__builtin_popcount(PROPOSAL))*double(DLEN)*double(total_primitives)/secTOTAL, 
-			double(HYPOTHESIS_ARRAY_SIZE*2)/(1048576. * secTRANSFER)   );
+			double(HYPOTHESIS_ARRAY_SIZE*2)/(1048576. * secTRANSFER),
+			AR_mean
+       		);
 		fclose(fp);
 	}
 
@@ -490,9 +519,13 @@ int main(int argc, char** argv)
 	delete[] host_hypotheses;
 	delete[] host_hypothesis_tmp;
 	delete[] host_data;
+	delete[] host_mcmc_results;
+	delete[] host_spec;
 	
 	cudaFree(device_data);
-	cudaFree(device_hypotheses);
-	cudaFree(device_out_MAPs);
+	cudaFree(dev_spec);
+	cudaFree(device_mcmc_results);
+// 	cudaFree(device_hypotheses);
+// 	cudaFree(device_out_MAPs);
 	
 }

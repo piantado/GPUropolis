@@ -10,7 +10,7 @@
 // here all hypotheses are allocated the maximum amount of memory
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-const int      MAX_MAX_PROGRAM_LENGTH = 50; // the most this could ever be. 
+const int      MAX_MAX_PROGRAM_LENGTH = 25; // the most this could ever be. 
 int            hMAX_PROGRAM_LENGTH = 25; // on the hostA
 __device__ int dMAX_PROGRAM_LENGTH = 25; // on the device
 
@@ -22,8 +22,6 @@ void set_MAX_PROGRAM_LENGTH(int v){
 	cudaMemcpyToSymbol(dMAX_PROGRAM_LENGTH,&hMAX_PROGRAM_LENGTH,sizeof(int));
 }
 
-
-
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // Variables for the constants and their types
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -31,6 +29,7 @@ void set_MAX_PROGRAM_LENGTH(int v){
 const int      MAX_CONSTANTS = 10; // how many constants per hypothesis at most?
 
 enum CONSTANT_TYPES { GAUSSIAN, EXPONENTIAL, UNIFORM,        __N_CONSTANT_TYPES};
+// enum CONSTANT_TYPES { UNIFORM,        __N_CONSTANT_TYPES};
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // Hypothesis
@@ -67,6 +66,8 @@ typedef struct hypothesis {
 	int nconstants; // how many constants are used?
 } hypothesis;
 
+#define COPY_HYPOTHESIS(x,y) memcpy( (void*)x, (void*)y, sizeof(hypothesis));
+
 
 // A standard initialization that sets this thing up!
 void initialize(hypothesis* h, RNG_DEF){
@@ -88,7 +89,7 @@ void initialize(hypothesis* h, RNG_DEF){
 	// Set up our constants -- just random
 	for(int i=0;i<MAX_CONSTANTS;i++) {
 		h->constants[i] = random_normal(RNG_ARGS);
-		h->constant_types[i] = GAUSSIAN;
+		h->constant_types[i] = UNIFORM;
 	}
 }
 

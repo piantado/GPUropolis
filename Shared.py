@@ -204,7 +204,13 @@ def smartrange(v, sds=0.0, pad=1.1):
 	padr = pad * r
 	return min(v-sds)-(padr-r)/2., max(v+sds)+(padr-r)/2.
 
-def data_ll(x,y,sd):
-	return numpy.sum( scipy.stats.norm.logpdf( numpy.abs(x - y)/sd))
+def data_ll(y1, y2, y1sd, y2sd):
+	"""
+		Compute the likelihood of the error of y0 | y1, given the two errors in each. For pointwise, set one to 0.0
+	"""
+	
+	mysd = numpy.sqrt( y1sd**2.0 + y2sd**2.0)
+	
+	return numpy.sum( scipy.stats.norm.logpdf( numpy.abs(y1 - y2)/mysd))
 
 	

@@ -1,3 +1,0 @@
-Data from Subtlex, using the top 100 most frequent words.
-
-Errors were computed from the sqrt of the variance (SD) of a multinomial, using the empirical counts as the frequency.

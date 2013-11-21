@@ -4,6 +4,32 @@
  * Functions for manipulating hypotheses on the host
  */
 
+// move all duplicates to the end, after sorting
+// this always returns tofill number of hypotheses, filling with defaulthyp
+// if we run out!
+void delete_duplicates(hypothesis* ar, int tofill, int maxlen, hypothesis* defaulthyp) {
+	for(int i=0,j=0;i<tofill;i++,j++) {
+		if(j<maxlen) {
+			// skip forward over everything identical
+			// NOTE: BECAUSE we do hypothesis_structurally_identical, we only store the top of each structure
+			// ignoring the differences in constants!
+			while(j+1 < maxlen && hypothesis_structurally_identical(&ar[j], &ar[j+1]))
+				j++;
+			
+			if(j!=i) {
+				COPY_HYPOTHESIS( &ar[i], &ar[j] );
+			}
+		}
+		else { // out of hyppotheses, so pad with blankhyp
+			COPY_HYPOTHESIS(&ar[i], defaulthyp);
+			
+		}
+	}
+	
+	
+}
+
+
 int map_index(hypothesis* ar, int len, double prior_temperature, double likelihood_temperature) {
 	int idx;
 	double bestval = -1.0/0.0;
@@ -66,7 +92,7 @@ void dump_to_file(const char* path, hypothesis* ar, int N, int append) {
 	
 	for(int n=0;n<N;n++) {
 		hypothesis* h = &ar[n];
-		fprintf(fp, "%d\t%d\t%.3f\t%.3f\t%.3f\t%.3f\t%d\t", n, h->chain_index, h->posterior,  h->prior, h->likelihood, h->acceptance_ratio, h->program_length);
+		fprintf(fp, "%d\t%d\t%.3f\t%.3f\t%.3f\t%d\t", n, h->chain_index, h->posterior,  h->prior, h->likelihood, h->program_length);
 		
 		//print out the program
 		fprintf(fp,"\"");
@@ -74,14 +100,14 @@ void dump_to_file(const char* path, hypothesis* ar, int N, int append) {
 		fprintf(fp,"\"\t");		
 		
 		// print out constant types
-		fprintf(fp,"\"");
-		for(int i=0;i<MAX_CONSTANTS;i++) fprintf(fp, "%i ", h->constant_types[i]);
-		fprintf(fp,"\"\t");
+// 		fprintf(fp,"\"");
+// // 		for(int i=0;i<MAX_CONSTANTS;i++) fprintf(fp, "%i ", h->constant_types[i]);
+// 		fprintf(fp,"\"\t");
 
 		// print out constants
-		fprintf(fp,"\"");
-		for(int i=0;i<MAX_CONSTANTS;i++) fprintf(fp, "%.3f ", h->constants[i]);
-		fprintf(fp,"\"\t");			
+// 		fprintf(fp,"\"");
+// 		for(int i=0;i<MAX_CONSTANTS;i++) fprintf(fp, "%.3f ", h->constants[i]);
+// 		fprintf(fp,"\"\t");			
 		
 		fprintf(fp, "\"");
 		print_program_as_expression(fp, h );

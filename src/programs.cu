@@ -5,7 +5,7 @@
  */
 
 // arrays to store the prior on the host and device
-const int MAX_NUM_OPS = 1000;
+const int MAX_NUM_OPS = 100;
 float            hPRIOR[MAX_NUM_OPS]; 
 __device__ float dPRIOR[MAX_NUM_OPS];
 
