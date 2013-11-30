@@ -82,7 +82,7 @@ void multinomial_sample(int N, hypothesis* toar, hypothesis* fromar, int fromlen
 	
 }
 
-void dump_to_file(const char* path, hypothesis* ar, int N, int append) {
+void dump_to_file(const char* path, hypothesis* ar, int repn, int outern, int N, int append) {
 	
 	
 	FILE* fp;
@@ -92,12 +92,12 @@ void dump_to_file(const char* path, hypothesis* ar, int N, int append) {
 	
 	for(int n=0;n<N;n++) {
 		hypothesis* h = &ar[n];
-		fprintf(fp, "%d\t%d\t%.3f\t%.3f\t%.3f\t%d\t", n, h->chain_index, h->posterior,  h->prior, h->likelihood, h->program_length);
+		fprintf(fp, "%i\t%i\t%d\t%d\t%.3f\t%.3f\t%.3f\t%d\t", repn, outern, n, h->chain_index, h->posterior,  h->prior, h->likelihood, h->program_length);
 		
 		//print out the program
-		fprintf(fp,"\"");
+/*		fprintf(fp,"\"");
 		for(int i=0;i<hMAX_PROGRAM_LENGTH;i++) fprintf(fp, "%d ", h->program[i]);
-		fprintf(fp,"\"\t");		
+		fprintf(fp,"\"\t");	*/	
 		
 		// print out constant types
 // 		fprintf(fp,"\"");

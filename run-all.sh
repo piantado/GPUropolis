@@ -1,10 +1,11 @@
  
 
-ITERATIONS=50000 # K20: 10000 #200000   ## About 1min for each 1k, for Zipf
+ITERATIONS=10000 #50000 # K20: 10000 #200000   ## About 1min for each 1k, for Zipf
 BURN_BLOCKS=0 ## Don't need to burn if taking maps and sampling. 
-OUTER_BLOCKS=100 #20  
+OUTER_BLOCKS=10 #20  
 N=100000 #50000 # 131072 #131072 # 131072 # 128*1024
 OUTROOT=run/
+REPETITONS=10 # how many times do we do this total?
 
 EXEC=./gpumcmc
 
@@ -30,11 +31,11 @@ DATA=data-sources/Science/BalmerSeries
 	
 	# run the CUDA MCMC; must use gnu time in order to output
 	# But here we also run time so it prints on command line too
-	time /usr/bin/time --output=$OUT/time.txt $EXEC --iterations=$ITERATIONS --in=$DATA/data.txt --outer=$OUTER_BLOCKS --burn=$BURN_BLOCKS --N=$N --out=$OUT --$WHICHHALF
+	time /usr/bin/time --output=$OUT/time.txt $EXEC --iterations=$ITERATIONS --repetitions=$REPETITONS --in=$DATA/data.txt --outer=$OUTER_BLOCKS --burn=$BURN_BLOCKS --N=$N --out=$OUT --$WHICHHALF
 	
 	# And a python post-processing script to do plotting.
 	# Run in the background so we can move to the next plot
-	nice -n 19 python postprocess.py --directory=$OUT &
+# 	nice -n 19 python postprocess.py --directory=$OUT &
 
 # done
 # done

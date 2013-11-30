@@ -10,7 +10,7 @@ all: main.o
 	# To see registers etc:
 	# --ptxas-options=-v
 	g++ -m64 -o gpumcmc main.o -L/usr/local/cuda-5.0/lib64 -lcudart
-
+	rm main.o
 	
 main.o: src/*.cu src/kernels/*
 

@@ -155,7 +155,7 @@ def div(x,y):
 
 @nanwrap
 def gamma(x):
-	if(x <= 0): return float("nan")
+	#if(x <= 0): return float("nan")
 	
 	return gamma_(x)
 

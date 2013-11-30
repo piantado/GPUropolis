@@ -32,14 +32,17 @@ __global__ void MH_simple_kernel(int N, mcmc_specification* all_spec, mcmc_resul
 	
 	hypothesis current_, proposal_, tmpbuf1_;
 	hypothesis *current=&current_, *proposal=&proposal_, *tmpbuf1=&tmpbuf1_;
+	
 	COPY_HYPOTHESIS(current, &(result->sample)); // copy to most local, current, to get all initialization check bits, etc
 	
 	// Initialize at random, or copy back from result (to start a previous chain)
 	if(spec->initialize){
 		random_closed_expression(current,  RNG_ARGS); 
 		update_hypothesis(current); // should go BEFORE compute_posterior
-		compute_posterior(data_length, data, current, stack);
 	}
+	
+	current->chain_index = idx;	
+	compute_posterior(data_length, data, current, stack);
 	
 	// initialize everything to be the current
 	COPY_HYPOTHESIS( proposal,          current );
@@ -76,26 +79,28 @@ __global__ void MH_simple_kernel(int N, mcmc_specification* all_spec, mcmc_resul
 		float pcur = current->prior/prior_temperature + current->likelihood/likelihood_temperature;
 		float ppro = proposal->prior/prior_temperature + proposal->likelihood/likelihood_temperature;
 		
-		int swap = (random_float(RNG_ARGS) < exp( (ppro-pcur+fb)/acceptance_temperature )) 
-		           && is_valid(proposal->posterior) 
-			   || !is_valid(current->posterior);
-		
+		int swap = (random_float(RNG_ARGS) < exp( (ppro-pcur+fb)/acceptance_temperature ) && is_valid(proposal->posterior))
+			   || is_invalid(current->posterior);
+	
 		// swap if we should
 		if(swap) {
 			
 			// swapadoo
-			hypothesis* tmp=current; current=proposal; proposal=tmp;
+			hypothesis* tmp=current; 
+			current=proposal; 
+			proposal=tmp;
 			
 			// update the chain acceptance count
 			result->acceptance_count++;
 			
 			// and update the MAP if we should
-			if(current->posterior > result->MAP.posterior || !is_valid(result->MAP.posterior)){
+			if(current->posterior > result->MAP.posterior || is_invalid(result->MAP.posterior)){
 				COPY_HYPOTHESIS( &(result->MAP), current);
 			}
 		} // end if swap
 		
 	} // end main mcmc
+	
 	result->proposal_count += iterations;
 	
 	// and yield this sample

@@ -20,11 +20,11 @@
 // Needed to define CUDART_NAN_F
 #include "math_constants.h"
 
-// use these since the functions isnan, ininf don't seem to work right for single precision...
-// #define is_invalid(x) (isnan(x) || isinf(x))
-#define is_invalid(x) (x==CUDART_INF_F || x == CUDART_NAN_F)
-#define is_valid(x) (!is_invalid(x))
 
+// check nans. isfinite requires finite and non-nan
+
+#define is_valid(x) (isfinite(x))
+#define is_invalid(x) (!is_valid(x))
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // Functions for avoiding branching. Most of these are just slow
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

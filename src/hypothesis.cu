@@ -53,7 +53,6 @@ typedef struct hypothesis {
 	float temperature;
 	float proposal_generation_lp; // with what log probability does our proposal mechanism generate this? 
 	int program_length; // how long is my program?
-	float acceptance_ratio; // after we run, what's the acceptance ratio for each thread?
 	int check2;
 	op_t   program[MAX_MAX_PROGRAM_LENGTH];
 	int check3;
@@ -64,6 +63,7 @@ typedef struct hypothesis {
 	int constant_types[MAX_CONSTANTS]; // 
 	int check6;
 	int nconstants; // how many constants are used?
+	int found_count; // how many times has this been found?
 } hypothesis;
 
 #define COPY_HYPOTHESIS(x,y) memcpy( (void*)x, (void*)y, sizeof(hypothesis));
@@ -76,9 +76,10 @@ void initialize(hypothesis* h, RNG_DEF){
 	h->likelihood = 0.0;
 	h->proposal_generation_lp = 0.0; 
 	h->program_length = 0.0;
-	h->acceptance_ratio = 0.0;
 	h->nconstants = 0;
-
+	h->found_count = 0;
+	h->chain_index = -1;
+	
 	// Set some check bits to catch buffer overruns. If any change, we have a problem!
 	h->check0 = CHECK_BIT;	h->check1 = CHECK_BIT;	h->check2 = CHECK_BIT;	h->check3 = CHECK_BIT; 	h->check4 = CHECK_BIT; 	h->check5 = CHECK_BIT; 	h->check6 = CHECK_BIT;
 	
@@ -173,7 +174,67 @@ int hypothesis_structurally_identical( hypothesis* a, hypothesis* b) {
 // 	printf("\"\n");
 // }
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// Bayes on hypotheses
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+// These are used below but defined for real elsewhere
+__device__ float f_output(float x, hypothesis* h, float* stack);
+__device__ float compute_x1depth_prior(hypothesis* h);
+
+__device__ float compute_likelihood(int DLEN, datum* device_data, hypothesis* h, float* stack) {
+
+	float ll = 0.0;
+	for(int i=0;i<DLEN;i++){
+		//__syncthreads(); // NOT a speed improvement
+		
+		float val = f_output( device_data[i].input, h, stack);
+		
+		// compute the difference between the output and what we see
+		data_t d = device_data[i].output - val;
+		
+		// and use a gaussian likelihood
+		ll += lnormalpdf(d, device_data[i].sd);
+	}
+	
+	// ensure valid
+	if (!is_valid(ll)) ll = -1.0f/0.0f;
+	
+ 	h->likelihood = ll;
+	
+	return h->likelihood;
+	
+}
+
+
+__device__ float compute_prior(hypothesis* h) {
+	
+// 	float lprior = compute_generation_probability(h); // the prior just on the program, and ad the rest
+// 	return lprior;
+	
+	// We just use the proposal as a prior
+	// NOTE: This means compute_generation_probability MUST be called beforee compute_posterior
+//  	h->prior =  h->proposal_generation_lp;
+	
+	// The fancy other prior
+	h->prior = compute_x1depth_prior(h);
+	
+	// Compute the constant prior (if we used constants)
+// 	h->prior += compute_constants_prior(h);
+	
+	// and check that we're not too long (since that leads to problems, apparently even if we are exactly the right length)
+	if(h->program_length >= dMAX_PROGRAM_LENGTH) {
+		h->prior = -1.0f/0.0f;
+	}
+	
+	return h->prior;
+}
+
+__device__ void compute_posterior(int DLEN, datum* device_data, hypothesis* h, float* stack) {
+	compute_prior(h);
+	compute_likelihood(DLEN, device_data, h, stack);
+	h->posterior = h->prior + h->likelihood;
+}
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // Manipulate constants in hypotheses
@@ -212,30 +273,30 @@ int hypothesis_structurally_identical( hypothesis* a, hypothesis* b) {
 
 
 // a drift kernel
-__device__ float resample_random_constant(hypothesis* h, RNG_DEF) {
-	if(h->nconstants == 0) return 0.0;
-	
-	int k = random_int(h->nconstants, RNG_ARGS);
-	
-	float old_value = h->constants[k];
-	float new_value = old_value + random_normal(RNG_ARGS); // just drive a standard gaussian
-	h->constants[k] = new_value;
-	
-	// since it's symmetric drift kernel proposal,
-	return 0.0;	
-}
+// __device__ float resample_random_constant(hypothesis* h, RNG_DEF) {
+// 	if(h->nconstants == 0) return 0.0;
+// 	
+// 	int k = random_int(h->nconstants, RNG_ARGS);
+// 	
+// 	float old_value = h->constants[k];
+// 	float new_value = old_value + random_normal(RNG_ARGS); // just drive a standard gaussian
+// 	h->constants[k] = new_value;
+// 	
+// 	// since it's symmetric drift kernel proposal,
+// 	return 0.0;	
+// }
 
 // Take h and resample one of the constant *types*
 // returning fb
 // TODO: WE CAN MAKE THIS A local-GIBBS MOVE--compute the probability of the observed constant
 // under each type and resample!!
-__device__ float resample_random_constant_type(hypothesis* h, RNG_DEF) {
-	if(h->nconstants == 0) return 0.0;
-	
-	int k = random_int(h->nconstants, RNG_ARGS);
-	h->constant_types[k] = random_int(__N_CONSTANT_TYPES, RNG_ARGS);
-	return 0.0;
-}
+// __device__ float resample_random_constant_type(hypothesis* h, RNG_DEF) {
+// 	if(h->nconstants == 0) return 0.0;
+// 	
+// 	int k = random_int(h->nconstants, RNG_ARGS);
+// 	h->constant_types[k] = random_int(__N_CONSTANT_TYPES, RNG_ARGS);
+// 	return 0.0;
+// }
 
 // Randomize the constants
 // __device__ float randomize_constants(hypothesis* h, RNG_DEF) {
@@ -248,20 +309,22 @@ __device__ float resample_random_constant_type(hypothesis* h, RNG_DEF) {
 
 // Compute the prior on constats
 // assuming constant types are generated uniformly
-__device__ float compute_constants_prior(hypothesis* h) {
-	
-	float lp = 0.0;
-	for(int k=0;k<h->nconstants;k++) {
-		float value = h->constants[k];
-		
-		switch(h->constant_types[k]) {
-			case GAUSSIAN:    lp += lnormalpdf(value, 1.0); break;
-// 			case LOGNORMAL:   lp += llnormalpdf(value, 1.0); break;
-			case EXPONENTIAL: lp += lexponentialpdf(value, 1.0); break;
-			case UNIFORM:     lp += luniformpdf(value); break;	
-		}
-	}
-	
-	return lp;
-}
+// __device__ float compute_constants_prior(hypothesis* h) {
+// 	
+// 	float lp = 0.0;
+// 	for(int k=0;k<h->nconstants;k++) {
+// 		float value = h->constants[k];
+// 		
+// 		switch(h->constant_types[k]) {
+// 			case GAUSSIAN:    lp += lnormalpdf(value, 1.0); break;
+// // 			case LOGNORMAL:   lp += llnormalpdf(value, 1.0); break;
+// 			case EXPONENTIAL: lp += lexponentialpdf(value, 1.0); break;
+// 			case UNIFORM:     lp += luniformpdf(value); break;	
+// 		}
+// 	}
+// 	
+// 	return lp;
+// }
+// 
+
 

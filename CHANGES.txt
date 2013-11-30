@@ -1,3 +1,7 @@
+2013 Nov 24:
+	- Fixed major bug in program insertion. Using slower code for now, but more clearly correct. 
+	- Removed resampling (this worked with old interfaces)
+	- Added a repetition loop to allow multiple repeats within a run
 2013 Nov 20:
 	- Major revision. Made kernel function take an "mcmc_specification" and return "mcmc_results", so that reading/writing to kernels is all bundled. Most kernels are not updated to handle this, so MH-simple-kernel is the only one currently working. The others may not be re-implemented. 
 	- Support for constants has been broken (minorly) in this revision, and may or may not be added back in. 
