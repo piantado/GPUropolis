@@ -355,9 +355,13 @@ void print_program_as_expression(FILE* fp, hypothesis* h) {
 		switch(op) {
 			case NOOP_:
 				break;
+			case ZERO_: 
+				top += 1;
+				strcpy(SS[top], "0"); // TODO: Shoudl ZERO_ And ONE_ be floats? Sympy doesn't fully simplify if floats
+				break;
 			case ONE_: 
 				top += 1;
-				strcpy(SS[top], "1.0");
+				strcpy(SS[top], "1");
 				break;
 			case X_:
 				top += 1;

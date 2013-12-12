@@ -1,0 +1,7 @@
+Paper on Boyle's data: http://www.ncbi.nlm.nih.gov/pubmed/10517789
+
+See this paper, referenced in the one here:
+Geary, R. C. Accuracy of Boyle’s original observations on the
+pressure and volume of a gas. Nature 151: 476, 1943
+
+That talks about the accuracy of the fit...

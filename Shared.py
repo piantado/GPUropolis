@@ -8,6 +8,9 @@ import sympy
 from sympy import init_printing, Symbol, expand
 from sympy.parsing.sympy_parser import parse_expr
 from collections import defaultdict
+
+try:			from scipy.misc import logsumexp as scipy_logsumexp
+except ImportError:	from scipy.maxentropy import logsumexp as scipy_logsumexp
  
 MAX_CONSTANTS = 10 # Max number of constants we'll display
 
@@ -105,7 +108,7 @@ def load_hypotheses(f, trim=10.0):
 """
 
 from math import isinf
-from numpy import exp, sin as sin_, arcsin as asin_, isnan, log as log_, power as power_, sqrt as sqrt_
+from numpy import exp, sin as sin_, arcsin as asin_, isnan, log as log_, power as power_, sqrt as sqrt_, sign as sign_
 from scipy.special import gamma as gamma_
 
 try:			from scipy.misc import logsumexp 
@@ -144,9 +147,7 @@ def mul(x,y): return x*y
 
 @nanwrap
 def sgn(x): 
-	if x<0: return -1
-	if x>0: return 1
-	return 0
+	return sign_(x)
 
 @nanwrap
 def div(x,y): 

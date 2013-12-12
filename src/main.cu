@@ -18,12 +18,16 @@
 
 // A hacked prior to penalize extra deep X, corresponding to very weirdo functions
 const float X_DEPTH_PENALTY = 100.0; // extra penalty for X depth. 0 here gives PCFG generation probability prior
-const float X_PENALTY = 10.0; // penalty for using X
+const float X_PENALTY = 0.0; // extra penalty for using X
+
+// not computed on chains but in the actual prior and likelihood:
+const float PRIOR_TEMPERATURE = 1000.0;
+const float LL_TEMPERATURE = 1.0;
 
 // Specification of the prior
 // in tree resampling, the expected length here is important in getting a good acceptance rate -- too low
 // (meaning too long) and we will reject almost everything
-const float EXPECTED_LENGTH = 3.0; // also the expected length of proposals
+const float EXPECTED_LENGTH = 5.0; // also the expected length of proposals
 const float PRIOR_XtoCONSTANT = 0.1; //what proportion of constant proposals are x (as opposed to all other constants)?
 
 #include "src/misc.cu"
@@ -60,18 +64,7 @@ int BURN_BLOCKS = 0; // how many blocks (of MCMC_ITERATIONS each) do we burn-in?
 int FIRST_HALF_DATA = 0; // use only the first half of the data
 int EVEN_HALF_DATA  = 0; // use only the even half of the data
 
-int END_OF_BLOCK_ACTION = 2; // an integer code for 
-/* 
- * 1: start anew each outer loop (restart from prior)
- * 2: maintain the same chain (just print the most recent sample)
- */
-/*
- * TODO: NOT IMPLEMENTED:
- * 5: resample from the top, penalizing by the number of samples already drawn from that hypothesis. So new things of high rank are 
-// double MAIN_RESAMPLE_DISCOUNT = 1.0; // the posterior is penalized by this * [the number of chains started here], so that we will explore newer regions of the space preferentially (even if they are not high probability mass). If this is set to 0.0, then we just resample from the real posterior. If it's +inf, we only restart a chain once
-
-// double RESAMPLE_IF_LOWER = 1000.0; // if we are this much lower than the max, we will be resampled from the top. 
-*/
+int END_OF_BLOCK_ACTION = 2; // If 1, we resample from the prior at the beginning of each block. Else we continue
 
 static struct option long_options[] =
 	{	
@@ -100,6 +93,7 @@ static struct option long_options[] =
 // --------------------------------------------------------------------------------------------------------------
 // --------------------------------------------------------------------------------------------------------------
 // --------------------------------------------------------------------------------------------------------------
+	
 int main(int argc, char** argv)
 {	
 	
@@ -143,8 +137,8 @@ int main(int argc, char** argv)
 	
 	string SAMPLE_PATH = OUT_PATH+"/samples.txt";
 	string MAP_PATH = OUT_PATH+"/MAPs.txt";
-	string TOP_PATH = OUT_PATH+"/tops.txt";
-// 	string SAMPLE_BINARY_PATH = OUTPATH+"/state"; // just a dump of host_hypotheses
+	string TOP_PATH = OUT_PATH+"/tops.txt"; // the top of the most recent repetition 
+	string ALL_TOP_PATH = OUT_PATH+"/all-tops.txt"; // the tops of each repetition are concatenated to this
 	string LOG_PATH = OUT_PATH+"/log.txt";
 	string PERFORMANCE_PATH = OUT_PATH+"/performance.txt";
 	
@@ -227,8 +221,8 @@ int main(int argc, char** argv)
 // 	float P_1arg  = P / float(count_args[1]);
 // 	float P_2arg  = P / float(count_args[2]);
 	// This way will put all mass equally among all functions, regardless of arity:
-	float P_1arg  = P / float(count_args[1] + count_args[2]);
-	float P_2arg  = P / float(count_args[1] + count_args[2]);;
+	float P_1arg  = 2.*P / float(count_args[1] + count_args[2]);
+	float P_2arg  = 2.*P / float(count_args[1] + count_args[2]);;
 	
 	for(int i=0;i<MAX_NUM_OPS;i++) hPRIOR[i] = 0.0; // must initialize since not all will be used
 	
@@ -243,6 +237,7 @@ int main(int argc, char** argv)
 	// normalize the prior
 	double priorZ = 0.0;
 	for(int i=0;i<NUM_OPS;i++) priorZ += hPRIOR[i];
+	assert(abs(1.-priorZ) < 1e-3); // assert we computed the prior correctly!
 	for(int i=0;i<NUM_OPS;i++) hPRIOR[i] /= priorZ;
 
 	// and copy PRIOR over to the device
@@ -270,7 +265,7 @@ int main(int argc, char** argv)
 	const size_t DATA_BYTE_LEN = DLEN*sizeof(datum);
 
 	// compute the maximum possible ll
-	// we use this for the start of annealing temperature
+	// we can use this for the start of annealing temperature?
 	double PERFECT_LL = 0.0;
 	for(int di=0;di<DLEN;di++) {PERFECT_LL += lnormalpdf( 0.0, host_data[di].sd); }
 
@@ -335,7 +330,6 @@ int main(int argc, char** argv)
 	mcmc_specification* host_spec = new mcmc_specification[N]; 
 	mcmc_specification* dev_spec; cudaMalloc((void **) &dev_spec, NSPECSIZE ); // device allocate
 
-	
 	// And set up the specifications!
 	for(int i=0;i<N;i++) {
 		host_spec[i].prior_temperature = 1.0;
@@ -355,8 +349,7 @@ int main(int argc, char** argv)
 	// -----------------------------------------------------------------------
 	
 	clock_t mytimer;
-	
-	
+		
 	for(int rep=0; rep<REPETITONS; rep++) { // how many repetitions do we do?
 	for(int outer=0;outer<OUTER_BLOCKS+BURN_BLOCKS;outer++) {
 		double secDEVICE=0.0, secHOST=0.0, secTRANSFER=0.0; // how long do we spend on each?	
@@ -370,10 +363,11 @@ int main(int argc, char** argv)
 			
 			
 			host_spec[i].rng_seed = seed + rng_seed++; // set this seed
-// 			cerr << host_spec[i].initialize << "\t" << host_spec[i].rng_seed << endl;
+
 			// THIS IS ANNEALING ON THE LIKELIHOOD
 // 			host_spec[i].likelihood_temperature = 1.0 + 5.0 / float(outer+1.0);
 		}
+		
 		mytimer = clock();
 		cudaMemcpy(dev_spec, host_spec, NSPECSIZE, cudaMemcpyHostToDevice);
 		cudaMemcpy(device_mcmc_results, host_mcmc_results, MCMC_RESULTS_SIZE, cudaMemcpyHostToDevice);
@@ -479,6 +473,9 @@ int main(int argc, char** argv)
 		fclose(fp);
 	
 	} // end outer loop 
+	
+	dump_to_file(ALL_TOP_PATH.c_str(), host_top_hypotheses, rep, OUTER_BLOCKS, NTOP, 1);
+	
 	} // end repetitions
 	
 	// -----------------------------------------------------------------------

@@ -10,9 +10,9 @@
 // here all hypotheses are allocated the maximum amount of memory
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-const int      MAX_MAX_PROGRAM_LENGTH = 25; // the most this could ever be. 
-int            hMAX_PROGRAM_LENGTH = 25; // on the hostA
-__device__ int dMAX_PROGRAM_LENGTH = 25; // on the device
+const int      MAX_MAX_PROGRAM_LENGTH = 50; // the most this could ever be. 
+int            hMAX_PROGRAM_LENGTH = 50; // on the hostA
+__device__ int dMAX_PROGRAM_LENGTH = 50; // on the device
 
 // we must use a function to set the program length, because its used on local and global vars
 // TODO: WHEN WE DO THIS, WE HAVE TO MAKE SURE THE HYPOTHESES ARE COPIED TO THE END OF THEIR PROGRAMS IF WE WANT THEM!
@@ -200,7 +200,7 @@ __device__ float compute_likelihood(int DLEN, datum* device_data, hypothesis* h,
 	// ensure valid
 	if (!is_valid(ll)) ll = -1.0f/0.0f;
 	
- 	h->likelihood = ll;
+ 	h->likelihood = ll / LL_TEMPERATURE;
 	
 	return h->likelihood;
 	
@@ -227,6 +227,9 @@ __device__ float compute_prior(hypothesis* h) {
 		h->prior = -1.0f/0.0f;
 	}
 	
+	
+	
+	h->prior = h->prior / PRIOR_TEMPERATURE;
 	return h->prior;
 }
 

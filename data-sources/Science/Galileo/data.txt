@@ -1,0 +1,11 @@
+# Data from Drake, pg 89
+# the SDs here are fixed to the distance in 1/64th of a second, as described by drake to be a useful guess at the error
+0.55	3.176	1.8
+1.10	12.705	3.7
+1.65	28.59	5.6
+2.20	50.82	7.4
+2.75	79.41	9.3
+3.30	114.3	11.2
+3.85	155.6	13.1
+4.40	203.3	14.9 
+# And Drake notes that the last data point is outside the expected range, but was later updated by Galileo

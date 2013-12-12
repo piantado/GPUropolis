@@ -1,4 +1,5 @@
 # Name, NumberOfArgs, Stack operation (in CUDA/C)
+ZERO	0	0.0f
 ONE	0	1.0f
 X	0	X
 NEG	1	my_neg(stack[top])

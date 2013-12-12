@@ -16,7 +16,7 @@ Options:
 	A new version to do all postprocessing at the same time.
 	
 	TODO: 
-	
+		--> Add better handling of repetitions -- we should be able to separate out and plot each individually (I think)
 		--> TELL THIS TO USE SAMPLES OR TOPS
 	
 		- Plot Held-out points differently (Filled vs open)
@@ -24,7 +24,6 @@ Options:
 		- A plot of observed-vs-expected probabilities for hypotheses -- how many in each bin?
 		- Check our estimator from counts 
 		- Need an "estimator" type to be accepted as input
-		- Fix pow that plots offscreen -- handle inf in error curve plots
 """
 import os
 import sys
@@ -45,6 +44,7 @@ assert os.path.exists(args['--directory']), "Directory %s does not exist!"%args[
 DIRECTORY = args['--directory']
 DATA_FILE = DIRECTORY+'/used-data/data.txt'
 HYPOTHESIS_FILE = DIRECTORY + "/samples.txt"
+#HYPOTHESIS_FILE = DIRECTORY + "/all-tops.txt" # the tops from all runs
 EVAL_FILE = DIRECTORY + "/model-comparison.txt"
 PLOT_DIR = DIRECTORY+"/plots/"
 
@@ -95,7 +95,7 @@ fullMaxLP = float("-inf")
 for l in open(HYPOTHESIS_FILE, 'r'):
 	if re.match("\s*#",l): continue
 	parts = re.split("\t", l)
-	lp = float(parts[2])
+	lp = float(parts[4])
 	if lp>fullMaxLP and not isnan(lp): fullMaxLP = lp
 	
 print "# Max posterior found:", fullMaxLP
@@ -110,7 +110,7 @@ for l in open(HYPOTHESIS_FILE, 'r'):
 	l = l.strip()
 	parts = re.split("\t", l)
 	
-	rank, n, lp, prior, ll, h = int(parts[0]), int(parts[1]), float(parts[2]), float(parts[3]), float(parts[4]),  re.sub("\"", "", parts[-1])
+	repetition, outer, rank, n, lp, prior, ll, h = int(parts[0]), int(parts[1]), int(parts[2]), int(parts[3]), float(parts[4]),  float(parts[5]), float(parts[6]),  re.sub("\"", "", parts[-1])
 	
 	# Fully skip these -- not just in plotting. If they are too terrible
 	if isnan(lp) or fullMaxLP-lp>trim: continue
@@ -124,6 +124,7 @@ for l in open(HYPOTHESIS_FILE, 'r'):
 			H2f[h] = f
 			H2post[h] = [lp, prior, ll]
 			
+			#print h, lp, map_lp, map_h
 			# Keep track of the MAP hypothesis
 			if lp > map_lp: 
 				map_lp, map_h = lp, h
@@ -135,6 +136,8 @@ for l in open(HYPOTHESIS_FILE, 'r'):
 	H2p[h] += 1.0 
 		
 print "# Loaded & compiled %i distinct hypotheses!" % len(H2p.keys())
+print "# Map H: ", map_h
+print "# Map Hlp:  ", map_lp
 
 # sum up the posteriors
 Z = sum(H2p.values())
@@ -142,6 +145,8 @@ for k,v in H2p.items():
 	assert k in H2f, k
 	H2p[k] = v / Z
 
+# and in log space
+lZ = logsumexp( [x[0] for x in H2post.values() ])
 
 
 #"""
@@ -209,7 +214,7 @@ print >>o, "i sample.count lp lpZ prior ll h hcon hform f0 f1 nconstants "+" ".j
 for hi, h in enumerate( sorted(H2p.keys(), key=lambda x: H2post[x][0], reverse=True) ):
 	# And convert H to a more reasonable form:
 	try:
-		sympystr = str(parse_expr(h))
+		sympystr = str(sympy.N(parse_expr(h))) # Parse and convert to floating point (so we can match later; otherwise exp(1)="E"
 	except OverflowError: sympystr = "<OVERFLOW>"
 	except ValueError:    sympystr = "<VALUE_ERROR>"
 	except RuntimeError:  sympystr = "<RUNTIME_ERROR>"
@@ -238,7 +243,7 @@ for hi, h in enumerate( sorted(H2p.keys(), key=lambda x: H2post[x][0], reverse=T
 	except: f1 = "NA"
 	
 	# Print out this hypothesis
-	print >>o, hi, H2p[h], H2post[h][0], H2post[h][0]-Z, H2post[h][1], H2post[h][2], q(h), q(sympystr), q(structural_form), f0,f1, nconstants, ' '.join(map(str,constants))	
+	print >>o, hi, H2p[h], H2post[h][0], H2post[h][0]-lZ, H2post[h][1], H2post[h][2], q(h), q(sympystr), q(structural_form), f0,f1, nconstants, ' '.join(map(str,constants))	
 o.close()
 
 
@@ -417,5 +422,6 @@ plt.set_xlim( *smartrange(xs) )
 plt.set_ylim( *smartrange(ys, sds=sds*5)  ) # *5 here to make the y axis show more around the top and bottom!
 fig.savefig(PLOT_DIR+"/predictions-%s.pdf"%traintype)        
 	
-	
 o.close()
+
+
