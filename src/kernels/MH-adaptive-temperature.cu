@@ -1,14 +1,27 @@
 /*
- * GPUropolis - 2013 Aug 30 - Steve Piantadosi 
+ * GPUropolis - 2013 Dec 15 - Steve Piantadosi 
  *
- * Simples kernel for running tree-regeneration MCMC on CUDA
+ * This adaptively increases the acceptance temperature as a function of how many rejections we've had in a row
+ * to help chains move around (which appears to be a huge problem without this). 
  * 
- * (NOTE: DOES NOT RUN CONSTANTS)
+ * It increases by a factor of INCREASE_PCT for each successive rejection greater than START_ADJUSTING_AT,
+ * scaling the result (no matter what) by spec->acceptance_temperature
+ * 
+ * NOTE: This often has hypotheses jump around really similar ones. Maybe the temperature should be scaled to the likelihood? 
+ * Or, we should jump 
  */
 
 // MH kernel with just RR regeneration proposal (for simplicity)
 
-__global__ void MH_simple_kernel(int N, mcmc_specification* all_spec, mcmc_results* all_results)
+// right choice of these can make you accept any proposal after some time in a rut...
+__device__ const float INCREASE_SCALE = 1.1; 
+__device__ const int START_ADJUSTING_AT = 1; // allow this many rejects in a row before we start to increase
+__device__ const int FULL_RESAMPLE_AT = START_ADJUSTING_AT + 50; // resample from the prior
+
+// OR: accept the first proposal after, say, 100 rejects? Different than the first resample...
+
+
+__global__ void MH_adaptive_temperature_kernel(int N, mcmc_specification* all_spec, mcmc_results* all_results)
 {
 	int idx = blockIdx.x * blockDim.x + threadIdx.x;
 	if(idx >= N) { return; }  // MUST have this or else all hell breaks loose
@@ -54,6 +67,9 @@ __global__ void MH_simple_kernel(int N, mcmc_specification* all_spec, mcmc_resul
 	result->proposal_count = 0;
 	result->rng_seed = spec->rng_seed; // store this
 	
+	// How many rejections in a row have we had?
+	int sequential_rejection_count = 0; 
+	
 	// ---------------------------------------------------------------------------------
 	// Now main MCMC iterations	
 	for(int mcmci=0;mcmci<iterations;mcmci++) {
@@ -79,26 +95,44 @@ __global__ void MH_simple_kernel(int N, mcmc_specification* all_spec, mcmc_resul
 		float pcur = current->prior/prior_temperature + current->likelihood/likelihood_temperature;
 		float ppro = proposal->prior/prior_temperature + proposal->likelihood/likelihood_temperature;
 		
-		int swap = (is_valid(proposal->posterior) && random_float(RNG_ARGS) < exp( (ppro-pcur+fb)/acceptance_temperature ))
-			   || is_invalid(current->posterior);
-	
-		// swap if we should
-		if(swap) {
-			
-			// swapadoo
-			hypothesis* tmp=current; 
-			current=proposal; 
-			proposal=tmp;
-			
-			// update the chain acceptance count
-			result->acceptance_count++;
-			
-			// and update the MAP if we should
-			if(current->posterior > result->MAP.posterior || is_invalid(result->MAP.posterior)){
-				COPY_HYPOTHESIS( &(result->MAP), current);
-			}
-		} // end if swap
+		// Either we fully re-draw from the prior
+		// or we continue, adjusting temperature
+		if(sequential_rejection_count > FULL_RESAMPLE_AT) {
+			random_closed_expression(current,  RNG_ARGS); 	
+			update_hypothesis(current); // should go BEFORE compute_posterior
+			sequential_rejection_count = 0;
+		}
+		else {
 		
+			// compute the acceptance temperature -- power increase for everything above START_ADJUSTING_AT
+			float myacctmp = acceptance_temperature;
+			if(sequential_rejection_count > START_ADJUSTING_AT) 
+				myacctmp *= pow(INCREASE_SCALE, (float)(sequential_rejection_count-START_ADJUSTING_AT));
+			
+			int swap = (is_valid(proposal->posterior) && random_float(RNG_ARGS) < exp( (ppro-pcur+fb)/myacctmp))
+				|| is_invalid(current->posterior);
+		
+			// swap if we should
+			if(swap) {
+				// reset this counter if we actually move to a *new* hypothesis
+				if(!dhypothesis_structurally_identical(current, proposal))
+					sequential_rejection_count = 0;
+				
+				// swapadoo
+				hypothesis* tmp=current; 
+				current=proposal; 
+				proposal=tmp;
+				
+				// update the chain acceptance count
+				result->acceptance_count++;
+				
+				// and update the MAP if we should
+				if(current->posterior > result->MAP.posterior || is_invalid(result->MAP.posterior)){
+					COPY_HYPOTHESIS( &(result->MAP), current);
+				}
+			} // end if swap
+		
+		}
 	} // end main mcmc
 	
 	result->proposal_count += iterations;

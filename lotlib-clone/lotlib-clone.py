@@ -45,8 +45,8 @@ P_CONSTANT = P_0arg * (1.0-PRIOR_XtoCONSTANT) / 1. # Number of constants
 G = PCFG()
 G.add_rule('START', '', ['EXPR'], 1.0)
 
-G.add_rule('EXPR', '1', [], P_CONSTANT)
-G.add_rule('EXPR', 'x', [], P_X)
+G.add_rule('EXPR', '1', None, P_CONSTANT)
+G.add_rule('EXPR', 'x', None, P_X)
 
 P2 = ((1.-1./EXPECTED_LENGTH)/3.) / 5. # put mass equally on all functions, regadless of arity
 G.add_rule('EXPR', 'ADD', ['EXPR', 'EXPR'], P2)

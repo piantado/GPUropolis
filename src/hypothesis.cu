@@ -11,8 +11,8 @@
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 const int      MAX_MAX_PROGRAM_LENGTH = 50; // the most this could ever be. 
-int            hMAX_PROGRAM_LENGTH = 50; // on the hostA
-__device__ int dMAX_PROGRAM_LENGTH = 50; // on the device
+int            hMAX_PROGRAM_LENGTH = 25; // on the hostA
+__device__ int dMAX_PROGRAM_LENGTH = 25; // on the device
 
 // we must use a function to set the program length, because its used on local and global vars
 // TODO: WHEN WE DO THIS, WE HAVE TO MAKE SURE THE HYPOTHESES ARE COPIED TO THE END OF THEIR PROGRAMS IF WE WANT THEM!
@@ -145,7 +145,7 @@ int sort_bestfirst_unique(const void* a, const void* b) {
 
 
 
-int hypothesis_structurally_identical( hypothesis* a, hypothesis* b) {
+__host__ int hypothesis_structurally_identical( hypothesis* a, hypothesis* b) {
 	// check if two hypotheses are equal in terms of the program (ignoring constants and other params)
 	
 	if(a->program_length != b->program_length) return 0;
@@ -155,7 +155,19 @@ int hypothesis_structurally_identical( hypothesis* a, hypothesis* b) {
 		if(a->program[i] != b->program[i]) return 0;
 	}
 	return 1;
+}// UUGH WE JUST REPEAT BELOW B/C MAX_PROGRAM_LENGTH IS DIFFERENT BETWEEN HOST AND DEVICE
+__device__ int dhypothesis_structurally_identical( hypothesis* a, hypothesis* b) { 
+	// check if two hypotheses are equal in terms of the program (ignoring constants and other params)
+	
+	if(a->program_length != b->program_length) return 0;
+	
+	// now loop back, only up to program_length
+	for(int i=dMAX_PROGRAM_LENGTH-1;i>=dMAX_PROGRAM_LENGTH-a->program_length;i--) {
+		if(a->program[i] != b->program[i]) return 0;
+	}
+	return 1;
 }
+
 
 // void print_program_as_expression(hypothesis* h); // needed by print but defined in programs.cu
 // void print_hypothesis(FILE* fp, int outer, int rank, int print_stack, hypothesis* h){
@@ -209,27 +221,27 @@ __device__ float compute_likelihood(int DLEN, datum* device_data, hypothesis* h,
 
 __device__ float compute_prior(hypothesis* h) {
 	
-// 	float lprior = compute_generation_probability(h); // the prior just on the program, and ad the rest
-// 	return lprior;
+	// and check that we're not too long (since that leads to problems, apparently even if we are exactly the right length)
+	if(h->program_length >= dMAX_PROGRAM_LENGTH){
+		h->prior = -1.0f/0.0f;	
+		return h->prior;
+	}
+	
+	float prior = 0.0;
+	
 	
 	// We just use the proposal as a prior
 	// NOTE: This means compute_generation_probability MUST be called beforee compute_posterior
-//  	h->prior =  h->proposal_generation_lp;
+	//prior = compute_generation_probability(h); // the prior just on the program
+ 	prior +=  h->proposal_generation_lp / PRIOR_TEMPERATURE;
 	
 	// The fancy other prior
-	h->prior = compute_x1depth_prior(h);
+	prior += compute_x1depth_prior(h); // only apply PRIOR_TEMPERATURE to the PCFG part, not to this X part
 	
 	// Compute the constant prior (if we used constants)
-// 	h->prior += compute_constants_prior(h);
+	// prior += compute_constants_prior(h);	
 	
-	// and check that we're not too long (since that leads to problems, apparently even if we are exactly the right length)
-	if(h->program_length >= dMAX_PROGRAM_LENGTH) {
-		h->prior = -1.0f/0.0f;
-	}
-	
-	
-	
-	h->prior = h->prior / PRIOR_TEMPERATURE;
+	h->prior = prior;
 	return h->prior;
 }
 

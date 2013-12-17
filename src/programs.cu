@@ -18,7 +18,7 @@ __device__ float dPRIOR[MAX_NUM_OPS];
 
 // Choose an op from the prior distribution
 // NOTE: assumes prior on expansions is normalized
-__device__ op_t random_op(int& x, int& y, int& z, int& w) {
+__device__ op_t random_op(RNG_DEF) {
 // 	float f = random_float(x,y,z,w);
 // 	op_t ret = 0;
 // 	int notdone = 1;
@@ -31,7 +31,7 @@ __device__ op_t random_op(int& x, int& y, int& z, int& w) {
 	
 	
 	// Version with breaks. Faster, apparently. 
-	float f = random_float(x,y,z,w);
+	float f = random_float(RNG_ARGS);
 	for(int i=0;i<NUM_OPS;i++) {
 		f = f-dPRIOR[i];
 		if(f <= 0.0) return i;
@@ -289,15 +289,16 @@ __device__ int find_program_length(op_t* program) {
 
 __device__ float compute_x1depth_prior(hypothesis* h) {
 	/*
-	 * Same as generation probability, except that x-vs-1 depends on the depth such that
-	 * we prefer x in shallow depths.
+	 * Extra penalty for xs that occur deeply nested. This returns the sum of X_PENALTY + X_DEPTH_PENALTY*depth  
+	 * over entire tree (add it to lp_generation probability). 
+	 * NOTE TODO: In the future, we should sum up the 1-these so we get a correctly normalized probability distribution
 	 * 
-	 * This uses prior_stack to store the depths as we iterate through the program
+	 * NOTE: This uses prior_stack to store the depths as we iterate through the program
 	 */
 	
 	int prior_stack[MAX_MAX_PROGRAM_LENGTH];
 	
-	float lprior = 0.0;
+	float mysum = 0.0;
 	int close = find_program_close(h->program);
 	
 	int di = 1; // what depth are we at?
@@ -305,13 +306,12 @@ __device__ float compute_x1depth_prior(hypothesis* h) {
 	
 	for(int i=dMAX_PROGRAM_LENGTH-1;i>=close;i--) { // start at the end so we measure depth correctly
 		op_t pi = h->program[i];
-		lprior += log(dPRIOR[pi]); // prior for this op
 		
 		// update our array keeping track of depth, and penalize if we should
 		switch( nargs(pi) ) {
 			case 0: 
 				di--;
-				lprior -= (pi == X_) * ( X_PENALTY + X_DEPTH_PENALTY * prior_stack[di] );
+				mysum -= (pi == X_) * exp( X_PENALTY + X_DEPTH_PENALTY * prior_stack[di] );
 				break;
 			case 1: 
 				prior_stack[di] = prior_stack[di-1]+1; // add one function, incrementing our count of functions
@@ -325,7 +325,7 @@ __device__ float compute_x1depth_prior(hypothesis* h) {
 				break;
 		}
 	}
-	return lprior; // */
+	return mysum; // */
 }
 
 

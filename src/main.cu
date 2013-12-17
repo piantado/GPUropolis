@@ -16,13 +16,16 @@
 #include <string.h>
 #include <vector>
 
-// A hacked prior to penalize extra deep X, corresponding to very weirdo functions
-const float X_DEPTH_PENALTY = 100.0; // extra penalty for X depth. 0 here gives PCFG generation probability prior
-const float X_PENALTY = 0.0; // extra penalty for using X
-
 // not computed on chains but in the actual prior and likelihood:
-const float PRIOR_TEMPERATURE = 1000.0;
+const float PRIOR_TEMPERATURE = 1.0;
 const float LL_TEMPERATURE = 1.0;
+
+// on mcmc specification:
+const float ACCEPTANCE_TEMPERATURE = 1.0;
+
+// A new prior to penalize extra deep X ( allowing many compositions on constants, not variables)
+const float X_DEPTH_PENALTY = 0.0; // extra penalty for X depth. 0 here gives PCFG generation probability prior
+const float X_PENALTY = 0.0; // extra penalty for using X
 
 // Specification of the prior
 // in tree resampling, the expected length here is important in getting a good acceptance rate -- too low
@@ -39,12 +42,15 @@ const float PRIOR_XtoCONSTANT = 0.1; //what proportion of constant proposals are
 #include "src/mcmc-results.cu"
 #include "src/virtual-machine.cu"
 #include "src/hypothesis-array.cu"
+
 #include "src/kernels/MH-simple-kernel.cu"
+#include "src/kernels/MH-adaptive-temperature.cu"
+#include "src/kernels/MH-adaptive-acceptance-rate.cu"
 
 using namespace std;
 
 int N = 1024;  // Hw many chains?
-int NTOP = 5000; // store this many of the "top" hypotheses 
+int NTOP = 1000; // store this many of the "top" hypotheses 
 
 const int BLOCK_SIZE = 128; // WOW 16 appears to be fastest here...
 int N_BLOCKS = 0; // set below
@@ -180,7 +186,7 @@ int main(int argc, char** argv)
 	
 	fp = fopen(PERFORMANCE_PATH.c_str(), "w");
 	if(fp==NULL) { cerr << "*** ERROR: Cannot open file:\t" << PERFORMANCE_PATH <<"\n"; exit(1);}
-	fprintf(fp, "repetition\tblock\tperfect.ll\tMAP.ll\tdevice.time\ttransfer.time\thost.time\tsamples.per.second\tf.per.second\tprimitives.per.second\ttransfer.mb.per.second\tacceptance.ratio\n");
+	fprintf(fp, "repetition\tblock\tperfect.ll\tMAP.ll\tdevice.time\ttransfer.time\thost.time\tsamples.per.second\tf.per.second\tprimitives.per.second\ttransfer.mb.per.second\tacceptance.ratio\ttop.overlap.pct\tduplicate.pct\n");
 	fclose(fp);
 	
 	// -----------------------------------------------------------------------
@@ -269,6 +275,10 @@ int main(int argc, char** argv)
 	double PERFECT_LL = 0.0;
 	for(int di=0;di<DLEN;di++) {PERFECT_LL += lnormalpdf( 0.0, host_data[di].sd); }
 
+	// kinda like if we sampel from the prior, what should we expect?
+	double ZERO_LL = 0.0;
+	for(int di=0;di<DLEN;di++) {ZERO_LL += lnormalpdf( host_data[di].output, host_data[di].sd); }
+		
 	// and put this on the GPU
 	datum* device_data; 
 	cudaMalloc((void **) &device_data, DATA_BYTE_LEN);
@@ -288,8 +298,9 @@ int main(int argc, char** argv)
 	// -----------------------------------------------------------------------
 	
 	// define random numbers:
-	int rx,ry,rz,rw;
-	rx = rand(); ry = rand(); rz = rand(); rw = rand();
+// 	int rx,ry,rz,rw;
+// 	rx = rand(); ry = rand(); rz = rand(); rw = rand();
+	int rx = rand();
 	
 	// this is how we seed each chain
 	long rng_seed = 0;
@@ -321,6 +332,9 @@ int main(int argc, char** argv)
 	// a special guy we keep  empty
 	hypothesis blankhyp; initialize(&blankhyp, RNG_ARGS);
 	
+	// Store these (used to compute number of duplicates among samples)
+	hypothesis* host_tmp_hypotheses = new hypothesis[N]; 
+	
 	// -----------------------------------------------------------------------
 	// Make the specification for mcmc steps, iterations, etc.
 	// -----------------------------------------------------------------------
@@ -334,7 +348,7 @@ int main(int argc, char** argv)
 	for(int i=0;i<N;i++) {
 		host_spec[i].prior_temperature = 1.0;
 		host_spec[i].likelihood_temperature = 1.0;
-		host_spec[i].acceptance_temperature = 1.0;
+		host_spec[i].acceptance_temperature = ACCEPTANCE_TEMPERATURE;
 		host_spec[i].iterations = MCMC_ITERATIONS; // how many steps to run?
 		host_spec[i].initialize = 1;
 		host_spec[i].rng_seed = 0; // set below
@@ -361,11 +375,10 @@ int main(int argc, char** argv)
 		for(int i=0;i<N;i++) {
 			host_spec[i].initialize = (outer==0)||(END_OF_BLOCK_ACTION==1);
 			
-			
 			host_spec[i].rng_seed = seed + rng_seed++; // set this seed
 
 			// THIS IS ANNEALING ON THE LIKELIHOOD
-// 			host_spec[i].likelihood_temperature = 1.0 + 5.0 / float(outer+1.0);
+// 			host_spec[i].likelihood_temperature = 1.0 + 1500.0 / float(outer+1.0);
 		}
 		
 		mytimer = clock();
@@ -374,14 +387,20 @@ int main(int argc, char** argv)
 		secTRANSFER += double(clock() - mytimer) / CLOCKS_PER_SEC;
 		
 		//////////////// Now run: //////////////// 
+		////////////////////////////////////////// 
 		
 		mytimer = clock();
 		
 		cudaDeviceSynchronize(); 
 		MH_simple_kernel<<<N_BLOCKS,BLOCK_SIZE>>>(N, dev_spec, device_mcmc_results);
+// 		MH_adaptive_acceptance_rate<<<N_BLOCKS,BLOCK_SIZE>>>(N, dev_spec, device_mcmc_results);
 		cudaDeviceSynchronize(); // wait for preceedings requests to finish
 		
 		secDEVICE = double(clock() - mytimer) / CLOCKS_PER_SEC;
+		
+		////////////////////////////////////////// 
+		////////////////////////////////////////// 
+		
 				
 		// Retrieve result from device and store it in host array
 		mytimer = clock();
@@ -398,8 +417,8 @@ int main(int argc, char** argv)
 		}		
 		
 		// sort them as required below
-		qsort( (void*)host_out_MAPs,   N, sizeof(hypothesis), hypothesis_posterior_compare);
 		qsort( (void*)host_hypotheses, N, sizeof(hypothesis), hypothesis_posterior_compare);
+		qsort( (void*)host_out_MAPs,   N, sizeof(hypothesis), hypothesis_posterior_compare);
 		
 		// make sure our check bits have not changed -- that we didn't overrun anything
 		for(int rank=0; rank<N; rank++){
@@ -426,17 +445,22 @@ int main(int argc, char** argv)
 		// we put these in host_top_hypotheses, and the first NTOP of these always stores the best
 		// we maintain this by copying all of host_out_MAPs to the end, resorting, and removing duplicates
 		
-		memcpy( (void*)&host_top_hypotheses[NTOP], (void*)host_out_MAPs, HYPOTHESIS_ARRAY_SIZE); // put these at the end
+		memcpy( (void*)&host_top_hypotheses[NTOP],   (void*)host_out_MAPs, HYPOTHESIS_ARRAY_SIZE); // put these at the end
 		memcpy( (void*)&host_top_hypotheses[NTOP+N], (void*)host_hypotheses, HYPOTHESIS_ARRAY_SIZE); // put these at the end
 		
 		
 		// resort, best first, putting duplicate programs next to each other
  		qsort(  (void*)host_top_hypotheses, NTOP+2*N, sizeof(hypothesis), sort_bestfirst_unique); 
 		// and now delete duplicates
-		delete_duplicates(host_top_hypotheses, NTOP, NTOP+2*N, &blankhyp);
+		int top_unique_count = delete_duplicates(host_top_hypotheses, NTOP, NTOP+2*N, &blankhyp);
 		// and save this
 		dump_to_file(TOP_PATH.c_str(), host_top_hypotheses, rep, outer, NTOP, 0);
-				
+		
+		// Also, comput ein our sample how many are duplicates
+		memcpy( (void*)host_tmp_hypotheses, (void*)host_hypotheses, HYPOTHESIS_ARRAY_SIZE);
+		int unique_count = delete_duplicates(host_tmp_hypotheses, N, N, &blankhyp);
+		
+		
 		// -----------------------------------------------------------------------------------------------------
 		// Now how to handle the end of a "block" -- what update do we do?
 			
@@ -456,7 +480,7 @@ int main(int argc, char** argv)
 		AR_mean /= float(N);
 		
 		FILE* fp = fopen(PERFORMANCE_PATH.c_str(), "a");
-		fprintf(fp, "%i\t%i\t%.2f\t%.2f\t%.6f\t%.6f\t%.6f\t%.2f\t%.2f\t%.2f\t%.2f\t%.5f\n",
+		fprintf(fp, "%i\t%i\t%.2f\t%.2f\t%.6f\t%.6f\t%.6f\t%.2f\t%.2f\t%.2f\t%.2f\t%.5f\t%.4f\t%.4f\n",
 			rep, 
 			outer, 
 			PERFECT_LL,
@@ -468,8 +492,11 @@ int main(int argc, char** argv)
 			double(N)*double(MCMC_ITERATIONS)*double(DLEN)/secTOTAL,
 			double(MCMC_ITERATIONS)*double(DLEN)*double(total_primitives)/secTOTAL, 
 			double(HYPOTHESIS_ARRAY_SIZE*2)/(1048576. * secTRANSFER),
-			AR_mean
-       		);
+       			AR_mean,
+			float(top_unique_count) / float(N),
+			float(unique_count) / float(N)
+		);
+			
 		fclose(fp);
 	
 	} // end outer loop 

@@ -7,17 +7,22 @@
 // move all duplicates to the end, after sorting
 // this always returns tofill number of hypotheses, filling with defaulthyp
 // if we run out!
-void delete_duplicates(hypothesis* ar, int tofill, int maxlen, hypothesis* defaulthyp) {
+// Returns the number of unique items
+int delete_duplicates(hypothesis* ar, int tofill, int maxlen, hypothesis* defaulthyp) {
+	
+	int unique_count = 0;
 	for(int i=0,j=0;i<tofill;i++,j++) {
 		if(j<maxlen) {
 			// skip forward over everything identical
 			// NOTE: BECAUSE we do hypothesis_structurally_identical, we only store the top of each structure
 			// ignoring the differences in constants!
-			while(j+1 < maxlen && hypothesis_structurally_identical(&ar[j], &ar[j+1]))
+			while(j+1 < maxlen && hypothesis_structurally_identical(&ar[j], &ar[j+1])) {
 				j++;
+			}
 			
 			if(j!=i) {
 				COPY_HYPOTHESIS( &ar[i], &ar[j] );
+				unique_count++;
 			}
 		}
 		else { // out of hyppotheses, so pad with blankhyp
@@ -26,7 +31,7 @@ void delete_duplicates(hypothesis* ar, int tofill, int maxlen, hypothesis* defau
 		}
 	}
 	
-	
+	return unique_count;
 }
 
 
@@ -92,7 +97,15 @@ void dump_to_file(const char* path, hypothesis* ar, int repn, int outern, int N,
 	
 	for(int n=0;n<N;n++) {
 		hypothesis* h = &ar[n];
-		fprintf(fp, "%i\t%i\t%d\t%d\t%.3f\t%.3f\t%.3f\t%d\t", repn, outern, n, h->chain_index, h->posterior,  h->prior, h->likelihood, h->program_length);
+		fprintf(fp, "%i\t%i\t%d\t%d\t%.3f\t%.3f\t%.3f\t%d\t", 
+			repn, 
+			outern, 
+			n, 
+			h->chain_index, 
+			h->posterior,  
+			h->prior,
+			h->likelihood, 
+			h->program_length);
 		
 		//print out the program
 /*		fprintf(fp,"\"");
