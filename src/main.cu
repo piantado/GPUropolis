@@ -15,6 +15,7 @@
 #include <getopt.h>
 #include <string.h>
 #include <vector>
+#include "cuPrintf.cu" //!
 
 // not computed on chains but in the actual prior and likelihood:
 const float PRIOR_TEMPERATURE = 1.0;
@@ -24,8 +25,8 @@ const float LL_TEMPERATURE = 1.0;
 const float ACCEPTANCE_TEMPERATURE = 1.0;
 
 // A new prior to penalize extra deep X ( allowing many compositions on constants, not variables)
-const float X_DEPTH_PENALTY = 0.0; // extra penalty for X depth. 0 here gives PCFG generation probability prior
-const float X_PENALTY = 0.0; // extra penalty for using X
+const float X_DEPTH_PENALTY = 100.0; // extra penalty for X depth. 0 here gives PCFG generation probability prior
+const float X_PENALTY = 10.0; // extra penalty for using X
 
 // Specification of the prior
 // in tree resampling, the expected length here is important in getting a good acceptance rate -- too low
@@ -43,9 +44,11 @@ const float PRIOR_XtoCONSTANT = 0.1; //what proportion of constant proposals are
 #include "src/virtual-machine.cu"
 #include "src/hypothesis-array.cu"
 
+#include "src/kernels/MH-prior-kernel.cu"
 #include "src/kernels/MH-simple-kernel.cu"
 #include "src/kernels/MH-adaptive-temperature.cu"
 #include "src/kernels/MH-adaptive-acceptance-rate.cu"
+#include "src/kernels/MH-detect-local-maxima.cu"
 
 using namespace std;
 
@@ -298,8 +301,6 @@ int main(int argc, char** argv)
 	// -----------------------------------------------------------------------
 	
 	// define random numbers:
-// 	int rx,ry,rz,rw;
-// 	rx = rand(); ry = rand(); rz = rand(); rw = rand();
 	int rx = rand();
 	
 	// this is how we seed each chain
@@ -391,10 +392,25 @@ int main(int argc, char** argv)
 		
 		mytimer = clock();
 		
+		cudaPrintfInit(); // set up cuPrintf
+                
 		cudaDeviceSynchronize(); 
 		MH_simple_kernel<<<N_BLOCKS,BLOCK_SIZE>>>(N, dev_spec, device_mcmc_results);
-// 		MH_adaptive_acceptance_rate<<<N_BLOCKS,BLOCK_SIZE>>>(N, dev_spec, device_mcmc_results);
+// 		MH_detect_local_maxima<<<N_BLOCKS,BLOCK_SIZE>>>(N, dev_spec, device_mcmc_results);
+// 		MH_adaptive_temperature_kernel<<<N_BLOCKS,BLOCK_SIZE>>>(N, dev_spec, device_mcmc_results);
+// 		MH_prior_kernel<<<N_BLOCKS,BLOCK_SIZE>>>(N, dev_spec, device_mcmc_results);
 		cudaDeviceSynchronize(); // wait for preceedings requests to finish
+// 		cudaError_t error = cudaGetLastError();
+		
+		cudaPrintfDisplay(stdout, true); // clean up cuPrintf
+		cudaPrintfEnd(); //
+		
+// 		if(error != cudaSuccess) {
+// 		// print the CUDA error message and exit
+// 		printf("CUDA error: %s\n", cudaGetErrorString(error));
+// 		exit(-1);
+// 		}
+
 		
 		secDEVICE = double(clock() - mytimer) / CLOCKS_PER_SEC;
 		

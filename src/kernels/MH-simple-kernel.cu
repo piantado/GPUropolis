@@ -43,7 +43,7 @@ __global__ void MH_simple_kernel(int N, mcmc_specification* all_spec, mcmc_resul
 	
 	current->chain_index = idx;	
 	compute_posterior(data_length, data, current, stack);
-	
+
 	// initialize everything to be the current
 	COPY_HYPOTHESIS( proposal,          current );
 	COPY_HYPOTHESIS( &(result->sample), current );
@@ -60,7 +60,7 @@ __global__ void MH_simple_kernel(int N, mcmc_specification* all_spec, mcmc_resul
 		
 		float fb = 0.0;
 		
-		// generate a novel tree in tmpbuf1
+// 		generate a novel tree in tmpbuf1
 		random_closed_expression(tmpbuf1, RNG_ARGS);
 		
 		// replace a subtree in proposal with tmpbuf1
@@ -82,7 +82,7 @@ __global__ void MH_simple_kernel(int N, mcmc_specification* all_spec, mcmc_resul
 		int swap = (is_valid(proposal->posterior) && random_float(RNG_ARGS) < exp( (ppro-pcur+fb)/acceptance_temperature ))
 			   || is_invalid(current->posterior);
 	
-		// swap if we should
+// 		swap if we should
 		if(swap) {
 			
 			// swapadoo

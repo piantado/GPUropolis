@@ -97,7 +97,7 @@ void dump_to_file(const char* path, hypothesis* ar, int repn, int outern, int N,
 	
 	for(int n=0;n<N;n++) {
 		hypothesis* h = &ar[n];
-		fprintf(fp, "%i\t%i\t%d\t%d\t%.3f\t%.3f\t%.3f\t%d\t", 
+		fprintf(fp, "%i\t%i\t%d\t%d\t%.3f\t%.3f\t%.3f\t%.3f\t%d\t", 
 			repn, 
 			outern, 
 			n, 
@@ -105,13 +105,14 @@ void dump_to_file(const char* path, hypothesis* ar, int repn, int outern, int N,
 			h->posterior,  
 			h->prior,
 			h->likelihood, 
+			h->proposal_generation_lp,
 			h->program_length);
 		
 		//print out the program
-/*		fprintf(fp,"\"");
-		for(int i=0;i<hMAX_PROGRAM_LENGTH;i++) fprintf(fp, "%d ", h->program[i]);
-		fprintf(fp,"\"\t");	*/	
-		
+// 		fprintf(fp,"\"");
+// 		for(int i=0;i<hMAX_PROGRAM_LENGTH;i++) fprintf(fp, "%d ", h->program[i]);
+// 		fprintf(fp,"\"\t");		
+// 		
 		// print out constant types
 // 		fprintf(fp,"\"");
 // // 		for(int i=0;i<MAX_CONSTANTS;i++) fprintf(fp, "%i ", h->constant_types[i]);

@@ -10,9 +10,9 @@
 // here all hypotheses are allocated the maximum amount of memory
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-const int      MAX_MAX_PROGRAM_LENGTH = 50; // the most this could ever be. 
-int            hMAX_PROGRAM_LENGTH = 25; // on the hostA
-__device__ int dMAX_PROGRAM_LENGTH = 25; // on the device
+const int      MAX_MAX_PROGRAM_LENGTH = 51; // the most this could ever be. 
+int            hMAX_PROGRAM_LENGTH = 50; // on the hostA
+__device__ int dMAX_PROGRAM_LENGTH = 50; // on the device
 
 // we must use a function to set the program length, because its used on local and global vars
 // TODO: WHEN WE DO THIS, WE HAVE TO MAKE SURE THE HYPOTHESES ARE COPIED TO THE END OF THEIR PROGRAMS IF WE WANT THEM!
@@ -28,7 +28,7 @@ void set_MAX_PROGRAM_LENGTH(int v){
 
 const int      MAX_CONSTANTS = 10; // how many constants per hypothesis at most?
 
-enum CONSTANT_TYPES { GAUSSIAN, EXPONENTIAL, UNIFORM,        __N_CONSTANT_TYPES};
+enum CONSTANT_TYPES { GAUSSIAN, EXPONENTIAL, UNIFORM,   __N_CONSTANT_TYPES};
 // enum CONSTANT_TYPES { UNIFORM,        __N_CONSTANT_TYPES};
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -46,6 +46,7 @@ typedef char op_t;
 // This also stores some ability for constants, but these are not used by all MH schemes
 typedef struct hypothesis {
 	float prior;
+	int check6;
 	float likelihood;
 	int check0;
 	float posterior;
@@ -61,7 +62,6 @@ typedef struct hypothesis {
 	float constants[MAX_CONSTANTS];
 	int check5;
 	int constant_types[MAX_CONSTANTS]; // 
-	int check6;
 	int nconstants; // how many constants are used?
 	int found_count; // how many times has this been found?
 } hypothesis;

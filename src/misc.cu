@@ -16,6 +16,7 @@
 #define nlog(x)  (-log(x))
 #define nlogf(x) (-log(float(x)))
 #define logf(x)  log(float(x))
+#define mean(x,y) (((x)+(y))/2)
 
 // Needed to define CUDART_NAN_F
 #include "math_constants.h"

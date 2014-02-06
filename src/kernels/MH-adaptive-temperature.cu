@@ -14,11 +14,9 @@
 // MH kernel with just RR regeneration proposal (for simplicity)
 
 // right choice of these can make you accept any proposal after some time in a rut...
-__device__ const float INCREASE_SCALE = 1.1; 
-__device__ const int START_ADJUSTING_AT = 1; // allow this many rejects in a row before we start to increase
-__device__ const int FULL_RESAMPLE_AT = START_ADJUSTING_AT + 50; // resample from the prior
-
-// OR: accept the first proposal after, say, 100 rejects? Different than the first resample...
+__device__ const float INCREASE_SCALE = 1.01; 
+__device__ const int START_ADJUSTING_AT = 0; // allow this many rejects in a row before we start to increase
+__device__ const int FULL_RESAMPLE_AT = 9999999; // resample from the prior
 
 
 __global__ void MH_adaptive_temperature_kernel(int N, mcmc_specification* all_spec, mcmc_results* all_results)
@@ -69,6 +67,7 @@ __global__ void MH_adaptive_temperature_kernel(int N, mcmc_specification* all_sp
 	
 	// How many rejections in a row have we had?
 	int sequential_rejection_count = 0; 
+	float myacctmp = acceptance_temperature; // current temperature
 	
 	// ---------------------------------------------------------------------------------
 	// Now main MCMC iterations	
@@ -92,47 +91,43 @@ __global__ void MH_adaptive_temperature_kernel(int N, mcmc_specification* all_sp
 		// compute the posterior (setting prior, likelihood on proposal)
 		compute_posterior(data_length, data, proposal, stack);
 		
-		float pcur = current->prior/prior_temperature + current->likelihood/likelihood_temperature;
+		float pcur = current->prior/prior_temperature  + current->likelihood/likelihood_temperature;
 		float ppro = proposal->prior/prior_temperature + proposal->likelihood/likelihood_temperature;
 		
 		// Either we fully re-draw from the prior
 		// or we continue, adjusting temperature
-		if(sequential_rejection_count > FULL_RESAMPLE_AT) {
-			random_closed_expression(current,  RNG_ARGS); 	
-			update_hypothesis(current); // should go BEFORE compute_posterior
-			sequential_rejection_count = 0;
-		}
-		else {
-		
-			// compute the acceptance temperature -- power increase for everything above START_ADJUSTING_AT
-			float myacctmp = acceptance_temperature;
-			if(sequential_rejection_count > START_ADJUSTING_AT) 
-				myacctmp *= pow(INCREASE_SCALE, (float)(sequential_rejection_count-START_ADJUSTING_AT));
-			
-			int swap = (is_valid(proposal->posterior) && random_float(RNG_ARGS) < exp( (ppro-pcur+fb)/myacctmp))
+		int swap = (is_valid(proposal->posterior) && random_float(RNG_ARGS) < exp( (ppro-pcur+fb)/myacctmp))
 				|| is_invalid(current->posterior);
 		
-			// swap if we should
-			if(swap) {
-				// reset this counter if we actually move to a *new* hypothesis
-				if(!dhypothesis_structurally_identical(current, proposal))
-					sequential_rejection_count = 0;
-				
-				// swapadoo
-				hypothesis* tmp=current; 
-				current=proposal; 
-				proposal=tmp;
-				
-				// update the chain acceptance count
-				result->acceptance_count++;
-				
-				// and update the MAP if we should
-				if(current->posterior > result->MAP.posterior || is_invalid(result->MAP.posterior)){
-					COPY_HYPOTHESIS( &(result->MAP), current);
-				}
-			} // end if swap
-		
+		// swap if we should
+		if(swap) {
+			// reset this counter if we actually move to a *new* hypothesis
+			if(!dhypothesis_structurally_identical(current, proposal)) {
+				myacctmp = acceptance_temperature;
+				sequential_rejection_count = 0;
+			}
+			
+			// swapadoo
+			hypothesis* tmp=current; 
+			current=proposal; 
+			proposal=tmp;
+			
+			// update the chain acceptance count
+			result->acceptance_count++;
+			
+			// and update the MAP if we should
+			if(current->posterior > result->MAP.posterior || is_invalid(result->MAP.posterior)){
+				COPY_HYPOTHESIS( &(result->MAP), current);
+			}
+		} // end if swap
+		else {
+			sequential_rejection_count++;
+			
+			// compute the acceptance temperature -- power increase for everything above START_ADJUSTING_AT
+			if(sequential_rejection_count >= START_ADJUSTING_AT) 
+				myacctmp = myacctmp * INCREASE_SCALE;	
 		}
+		
 	} // end main mcmc
 	
 	result->proposal_count += iterations;

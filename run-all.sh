@@ -1,5 +1,5 @@
  
-ITERATIONS=5000 #50000 # K20: 10000 #200000   ## About 1min for each 1k, for Zipf
+ITERATIONS=100000 #50000 # K20: 10000 #200000   ## About 1min for each 1k, for Zipf
 OUTER_BLOCKS=10 #20  
 N=10000 #50000 # 131072 #131072 # 131072 # 128*1024
 OUTROOT=run/
@@ -11,9 +11,10 @@ REPETITONS=1 # how many times do we do this total?
 # OUTROOT=run/
 # REPETITONS=1 # how many times do we do this total?
 
+# The executable
 EXEC=./gpumcmc
 
-# Make globs work how we want
+# Make globs work how we want. Linux is magic.
 shopt -s globstar
 
 OUTROOT=./run
@@ -23,10 +24,11 @@ WHICHHALF=all
 
 # DATA=data-sources/Regression/-10_20
 # for DATA in $(ls -d data-sources/Regression/*); do
-DATA=data-sources/Science/BalmerSeries
+# DATA=data-sources/Science/BalmerSeries
 # for WHICHHALF in 'all' 'first-half' 'even-half' ; do
 # for DATA in $(ls -d data-sources/Science/*)  $(ls -d data-sources/Stats/*) $(ls -d data-sources/NIST/*) ; do
-	
+for DATA in $(ls -d data-sources/Science/*)  $(ls -d data-sources/Stats/*) $(ls -d data-sources/NIST/*) ; do
+
 	echo Running $DATA 
 	
 	OUT=$OUTROOT/$DATA-$WHICHHALF/
@@ -45,5 +47,5 @@ DATA=data-sources/Science/BalmerSeries
 	# Run in the background so we can move to the next plot
 # 	nice -n 19 python postprocess.py --directory=$OUT &
 
-# done
+done
 # done

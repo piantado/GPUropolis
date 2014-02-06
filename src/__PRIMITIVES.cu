@@ -15,4 +15,4 @@ __device__ const int NARGS[]  = {0, 0,0,0,1,1,1,2,2,2,2,2 };
 
  // Non-defined primitives, used potentially by print_program_as_expression
 
-#define CONSTANT_ -99
+#define CONSTANT_ -991

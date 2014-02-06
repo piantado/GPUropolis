@@ -61,12 +61,12 @@ print >>primitives, " const char* NAMES[] = { \"<NA>\", "+",".join(["\""+re.sub(
 
 # And things that are used in print, but may or may not be defined
 print >>primitives, "\n // Non-defined primitives, used potentially by print_program_as_expression\n"
-if "CONSTANT_" not in names: print >>primitives, "#define CONSTANT_ -99" # so that code doesn't crash that uses this
-if "ADD_" not in names: print >>primitives, "#define ADD_ -99" # so that code doesn't crash that uses this
-if "SUB_" not in names: print >>primitives, "#define SUB_ -99" # so that code doesn't crash that uses this
-if "MUL_" not in names: print >>primitives, "#define MUL_ -99" # so that code doesn't crash that uses this
-if "DIV_" not in names: print >>primitives, "#define DIV_ -99" # so that code doesn't crash that uses this
-if "POW_" not in names: print >>primitives, "#define POW_ -99" # so that code doesn't crash that uses this
+if "CONSTANT_" not in names: print >>primitives, "#define CONSTANT_ -991" # so that code doesn't crash that uses this
+if "ADD_" not in names: print >>primitives, "#define ADD_ -992" # so that code doesn't crash that uses this
+if "SUB_" not in names: print >>primitives, "#define SUB_ -993" # so that code doesn't crash that uses this
+if "MUL_" not in names: print >>primitives, "#define MUL_ -994" # so that code doesn't crash that uses this
+if "DIV_" not in names: print >>primitives, "#define DIV_ -995" # so that code doesn't crash that uses this
+if "POW_" not in names: print >>primitives, "#define POW_ -996" # so that code doesn't crash that uses this
 
 primitives.close()
 
