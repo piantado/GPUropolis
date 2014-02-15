@@ -273,28 +273,6 @@ __device__ int find_program_length(op_t* program) {
 	return dMAX_PROGRAM_LENGTH-find_program_close(program);
 }
 
-
-// DEFUNCT:
-// Compute the probability of generating this program according to the model!
-// __device__ float compute_generation_probability(hypothesis* h) {
-// 	/*
-// 	// A version with uniform branching
-// 	float lprior = 0.0;
-// 	int close = find_program_close(h->program);
-// 	for(int i=0;i<dMAX_PROGRAM_LENGTH;i++) {
-// 		lprior     += (i>=close)*log(PRIOR[h->program[i]]); // prior for this op
-// 	}
-// 	return lprior;
-// 	/*/
-// 	// version that doesn't loop over the entire program
-// 	float lprior = 0.0;
-// 	int close = find_program_close(h->program);
-// 	for(int i=close;i<dMAX_PROGRAM_LENGTH;i++) {
-// 		lprior += log(PRIOR[h->program[i]]); // prior for this op
-// 	}
-// 	return lprior; // */
-// }
-
 __device__ float compute_x1depth_prior(hypothesis* h) {
 	/*
 	 * Extra penalty for xs that occur deeply nested. This returns the sum of X_PENALTY + X_DEPTH_PENALTY*depth  

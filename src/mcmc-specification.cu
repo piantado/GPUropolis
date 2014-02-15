@@ -16,8 +16,4 @@ typedef struct mcmc_specification {
 	int data_length;
 	datum* data;
 	
-	// for storing mcmc acceptance ratios, etc. 
-// // 	unsigned int acceptance_count;
-// 	unsigned int proposal_count;
-	
 } mcmc_specification;

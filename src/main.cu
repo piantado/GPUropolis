@@ -68,7 +68,7 @@ int SEED = -1; // Random number seed (for replicability) if -1, we use time()
 int REPETITONS = 1; // how many outer loops do we repeat?
 int MCMC_ITERATIONS = 1000; 
 int OUTER_BLOCKS = 1;
-int BURN_BLOCKS = 0; // how many blocks (of MCMC_ITERATIONS each) do we burn-in?
+int BURN_BLOCKS = 0; // how many blocks (of MCMC_ITERATIONS each) do we burn-in? This is not sensible if we aren't using samples as samples
 
 int FIRST_HALF_DATA = 0; // use only the first half of the data
 int EVEN_HALF_DATA  = 0; // use only the even half of the data

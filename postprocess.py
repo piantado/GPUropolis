@@ -110,7 +110,7 @@ for l in open(HYPOTHESIS_FILE, 'r'):
 	l = l.strip()
 	parts = re.split("\t", l)
 	
-	repetition, outer, rank, n, lp, prior, ll, pprob, h = int(parts[0]), int(parts[1]), int(parts[2]), int(parts[3]), float(parts[4]),  float(parts[5]), float(parts[6]),  re.sub("\"", "", parts[-1])
+	repetition, outer, rank, n, lp, prior, ll, pprob, hlen, h = int(parts[0]), int(parts[1]), int(parts[2]), int(parts[3]), float(parts[4]),  float(parts[5]), float(parts[6]), float(parts[7]), int(parts[8]), re.sub("\"", "", parts[-1])
 	
 	# Fully skip these -- not just in plotting. If they are too terrible
 	if isnan(lp) or fullMaxLP-lp>trim: continue
