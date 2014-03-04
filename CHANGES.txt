@@ -1,3 +1,8 @@
+2014 Mar 4:
+	- Changed to make mainly MCMC over constants
+	- removed MAPs so that a run either returns samples or MAPS, no separate MAP arrays
+	- Also no separate host_hypotheses, everything lives in mcmc_spec
+	- Added enumeration abilities, so you can enumerate all trees up to a given size, and run MCMC on the constants
 2013 Nov 24:
 	- Fixed major bug in program insertion. Using slower code for now, but more clearly correct. 
 	- Removed resampling (this worked with old interfaces)

@@ -44,7 +44,6 @@ assert os.path.exists(args['--directory']), "Directory %s does not exist!"%args[
 DIRECTORY = args['--directory']
 DATA_FILE = DIRECTORY+'/used-data/data.txt'
 HYPOTHESIS_FILE = DIRECTORY + "/samples.txt"
-#HYPOTHESIS_FILE = DIRECTORY + "/all-tops.txt" # the tops from all runs
 EVAL_FILE = DIRECTORY + "/model-comparison.txt"
 PLOT_DIR = DIRECTORY+"/plots/"
 

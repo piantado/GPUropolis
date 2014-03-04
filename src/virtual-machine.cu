@@ -8,20 +8,20 @@ __device__ data_t f_output(data_t X, hypothesis* h, data_t* stack) {
 
 	int top = 0;
 	
-	int program_start = dMAX_PROGRAM_LENGTH-h->program_length;
+	int program_start = MAX_PROGRAM_LENGTH-h->program_length;
 	op_t* pi_ptr = h->program + program_start;
 	
 	// used if we have constants
-// 	int constant_i = 0; // index into the constant array, increasing order
+	int constant_i = 0; // index into the constant array, increasing order
 	
 	// We could start at p=0 to avoid branching, but actually here we start at the program length since its faster for short programs
-	for(int p=program_start;p<dMAX_PROGRAM_LENGTH;p++) { // program pointer -- IF YOU CHANGE THIS, CHANGE IT IN THE PROGRAM PRINTER TO AVOID CONST WEIRDNESS
+	for(int p=program_start;p<MAX_PROGRAM_LENGTH;p++) { // program pointer -- IF YOU CHANGE THIS, CHANGE IT IN THE PROGRAM PRINTER TO AVOID CONST WEIRDNESS
 		op_t op = (*pi_ptr);
 		
 		int newtop = top + stack_change(op);
 		
 		// If top is out of range, this makes it a NOOP if we go out of range, preventing us from having to initialize the stack
-		op = op*(top>=0 & newtop>=0 & top<dMAX_PROGRAM_LENGTH & newtop<dMAX_PROGRAM_LENGTH);
+		op = op*(top>=0 & newtop>=0 & top<MAX_PROGRAM_LENGTH & newtop<MAX_PROGRAM_LENGTH);
 		
 		switch(op){
 			// Fast ops: http://developer.download.nvidia.com/compute/cuda/4_2/rel/toolkit/docs/online/group__CUDA__MATH__INTRINSIC__SINGLE.html

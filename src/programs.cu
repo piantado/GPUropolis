@@ -57,12 +57,12 @@ __device__ int find_close_backwards(op_t* buf, int pos) {
 	
 }
 
-// from start...end copy into to[dMAX_PROGRAM_LENGTH-(end-start+1)]..to[dMAX_PROGRAM_LENGTH-1]
+// from start...end copy into to[MAX_PROGRAM_LENGTH-(end-start+1)]..to[MAX_PROGRAM_LENGTH-1]
 // TODO: CHECK OFF BY 1s
 // It does this while computing the close backwards
 __device__ void copy_subnode_to(hypothesis* from, hypothesis* to, int pos) {
 	
-	int j=dMAX_PROGRAM_LENGTH-1;
+	int j=MAX_PROGRAM_LENGTH-1;
 	int nopen = -1;
 	for(int i=pos;nopen != 0 && i>=0;i--) {
 		op_t op = from->program[i];
@@ -72,18 +72,18 @@ __device__ void copy_subnode_to(hypothesis* from, hypothesis* to, int pos) {
 	}
 	
 	// update the length
-	to->program_length = dMAX_PROGRAM_LENGTH - (j+1);	
+	to->program_length = MAX_PROGRAM_LENGTH - (j+1);	
 }
 
 // starting with startpos and moving backwards, find tofind in findin
 __device__ int count_identical_to(hypothesis* tofind, hypothesis* findin, int startpos) {
 	
 	int cnt = 0;
-	for(int i=startpos; i>=dMAX_PROGRAM_LENGTH-findin->program_length;i--) {
+	for(int i=startpos; i>=MAX_PROGRAM_LENGTH-findin->program_length;i--) {
 		
 		int keep = 1;
 		for(int j=0;j<tofind->program_length && keep;j++) {
-			keep = keep && (tofind->program[dMAX_PROGRAM_LENGTH-1-j] == findin->program[i-j]);
+			keep = keep && (tofind->program[MAX_PROGRAM_LENGTH-1-j] == findin->program[i-j]);
 		}
 		cnt += keep;
 	}
@@ -95,8 +95,8 @@ __device__ int count_identical_to(hypothesis* tofind, hypothesis* findin, int st
 // Replace pos in from with x
 // NOTE: We require that from != to
 // __device__ void replace_subnode_with(hypothesis* from, hypothesis* to, int pos, hypothesis* x) {
-// 	int start_ar = dMAX_PROGRAM_LENGTH - from->program_length;
-// 	int xstart = dMAX_PROGRAM_LENGTH - x->program_length;
+// 	int start_ar = MAX_PROGRAM_LENGTH - from->program_length;
+// 	int xstart = MAX_PROGRAM_LENGTH - x->program_length;
 // 	
 // 	// set ar[start_ar...(start_ar+len_ar)] = x[MAX_PROGRAM_LENGTH-len_x:MAX_PROGRAM_LENGTH-1];
 // 	// nonincludsive of end_ar, but inclusive of start_ar. inclusive of start_x
@@ -106,12 +106,12 @@ __device__ int count_identical_to(hypothesis* tofind, hypothesis* findin, int st
 // 	int shift = x->program_length - (pos+1-start_ar); 
 // 	
 // 	int xi = xstart;
-// 	for(int ari=0;ari<dMAX_PROGRAM_LENGTH;ari++) {
+// 	for(int ari=0;ari<MAX_PROGRAM_LENGTH;ari++) {
 // 		int in_splice_region = (ari>=start_ar-shift) && (ari<=pos);
 // 		int in_final_region = (ari > pos);
 // 		
 // 		// wrap this for in case it goes off the end
-// 		int ar_ari_shift = ifthen( (ari+shift < 0) || (ari+shift >= dMAX_PROGRAM_LENGTH), 0, from->program[ari+shift]);
+// 		int ar_ari_shift = ifthen( (ari+shift < 0) || (ari+shift >= MAX_PROGRAM_LENGTH), 0, from->program[ari+shift]);
 // 		
 // 		to->program[ari] = ifthen(in_splice_region, x->program[xi], ifthen(in_final_region, from->program[ari], ar_ari_shift) );
 // 		
@@ -133,34 +133,34 @@ __device__ void replace_subnode_with(hypothesis* from, hypothesis* to, int endsp
 	 * 
 	 */
 	int startsplice = find_close_backwards(from->program, endsplice); 
-	int xclose = dMAX_PROGRAM_LENGTH - x->program_length;
+	int xclose = MAX_PROGRAM_LENGTH - x->program_length;
 	int shift = x->program_length - (endsplice-startsplice+1);
 
-// 	for(int i=dMAX_PROGRAM_LENGTH-from->program_length;i<dMAX_PROGRAM_LENGTH;i++){
+// 	for(int i=MAX_PROGRAM_LENGTH-from->program_length;i<MAX_PROGRAM_LENGTH;i++){
 // 		cuPrintf("\tf %d %d %d %d %d %d\n", i, from->program[i], from->program_length, x->program_length, startsplice, endsplice);
 // 	}
-// 	for(int i=dMAX_PROGRAM_LENGTH-x->program_length;i<dMAX_PROGRAM_LENGTH;i++){
+// 	for(int i=MAX_PROGRAM_LENGTH-x->program_length;i<MAX_PROGRAM_LENGTH;i++){
 // 		cuPrintf("\tx %d %d %d %d\n", i, x->program_length, x->program[i], 0);
 // 	}	
 	
 	// under these situations we cannot insert
-	if(from->program_length+shift < dMAX_PROGRAM_LENGTH && from->program_length+shift >= 0 && startsplice >= 0 && xclose >= 0) {
+	if(from->program_length+shift < MAX_PROGRAM_LENGTH && from->program_length+shift >= 0 && startsplice >= 0 && xclose >= 0) {
 		
 		
 		int xi = xclose;
-		for(int i=0;i<dMAX_PROGRAM_LENGTH;i++) {
+		for(int i=0;i<MAX_PROGRAM_LENGTH;i++) {
 			if(i+shift < 0) {
 				continue; // do nothing here
 			}
 			else if(i+shift < startsplice) { 
-				assert(i+shift < dMAX_PROGRAM_LENGTH);
+				assert(i+shift < MAX_PROGRAM_LENGTH);
 				assert(i+shift>=0);
 				to->program[i] = from->program[i+shift];
 			}
 			else if( i+shift >= startsplice && i <= endsplice){
-				assert(i < dMAX_PROGRAM_LENGTH);
+				assert(i < MAX_PROGRAM_LENGTH);
 				assert(i>=0);
-				assert(xi < dMAX_PROGRAM_LENGTH);
+				assert(xi < MAX_PROGRAM_LENGTH);
 				assert(xi >= xclose);
 				to->program[i] = x->program[xi];
 				xi++;
@@ -176,7 +176,7 @@ __device__ void replace_subnode_with(hypothesis* from, hypothesis* to, int endsp
 	}
 	else {
 		// We can't insert, so make it to nothing
-		for(int i=0;i<dMAX_PROGRAM_LENGTH;i++) 
+		for(int i=0;i<MAX_PROGRAM_LENGTH;i++) 
 			to->program[i] = NOOP_; // from->program[i];
 		
 		to->program_length = 0; // from->program_length;
@@ -185,7 +185,7 @@ __device__ void replace_subnode_with(hypothesis* from, hypothesis* to, int endsp
 }
 
 __device__ void replace_random_subnode_with(hypothesis* from, hypothesis* to, hypothesis* x, RNG_DEF) {
-	int pos =  dMAX_PROGRAM_LENGTH-1 - random_int(from->program_length, RNG_ARGS);
+	int pos =  MAX_PROGRAM_LENGTH-1 - random_int(from->program_length, RNG_ARGS);
 	replace_subnode_with(from, to, pos, x);
 }
 
@@ -202,7 +202,7 @@ __device__ void update_hypothesis(hypothesis* h){
 	int keep = 1; // this stores whether or not we see an erroneous NOOP_, in which case we make it infinitely bad
 	
 	// else actually compute	
-	for(pos=dMAX_PROGRAM_LENGTH-1;;pos--) {
+	for(pos=MAX_PROGRAM_LENGTH-1;;pos--) {
 		
 		// it will never work out
 		if(pos < 0){keep = 0; break; }
@@ -223,7 +223,7 @@ __device__ void update_hypothesis(hypothesis* h){
 		
 	if(keep) {
 		h->nconstants = min(nconstants,MAX_CONSTANTS); // must ensure that we don't ever think we have too many!
-		h->program_length = dMAX_PROGRAM_LENGTH-pos;
+		h->program_length = MAX_PROGRAM_LENGTH-pos;
 		h->proposal_generation_lp = gp;
 	} 
 	else {
@@ -242,7 +242,7 @@ __device__ void random_closed_expression(hypothesis* to, RNG_DEF) {
 	
 	int nopen = -1; // to begin, we are looking for 1 arg to the left
 	int len = 0;
-	for(int i=dMAX_PROGRAM_LENGTH-1;i>=0;i--) {
+	for(int i=MAX_PROGRAM_LENGTH-1;i>=0;i--) {
 		if(nopen != 0) {
 			op_t newop = random_op(RNG_ARGS); //
 			assert(newop != NOOP_);
@@ -263,14 +263,14 @@ __device__ void random_closed_expression(hypothesis* to, RNG_DEF) {
 
 __device__ int find_program_close(op_t* program){
 	// Where does this progrem end? (going backwards)
-	return find_close_backwards(program, dMAX_PROGRAM_LENGTH-1);
+	return find_close_backwards(program, MAX_PROGRAM_LENGTH-1);
 }
 
 
 // starting at the RHS, go until we find the "Effective" program length (ignoring things that are not used)
 __device__ int find_program_length(op_t* program) {
 	// how long is this program?
-	return dMAX_PROGRAM_LENGTH-find_program_close(program);
+	return MAX_PROGRAM_LENGTH-find_program_close(program);
 }
 
 __device__ float compute_x1depth_prior(hypothesis* h) {
@@ -282,7 +282,7 @@ __device__ float compute_x1depth_prior(hypothesis* h) {
 	 * NOTE: This uses prior_stack to store the depths as we iterate through the program
 	 */
 	
-	int prior_stack[MAX_MAX_PROGRAM_LENGTH];
+	int prior_stack[MAX_PROGRAM_LENGTH];
 	
 	float mysum = 0.0;
 	int close = find_program_close(h->program);
@@ -290,7 +290,7 @@ __device__ float compute_x1depth_prior(hypothesis* h) {
 	int di = 1; // what depth are we at?
 	prior_stack[0] = 0;
 	
-	for(int i=dMAX_PROGRAM_LENGTH-1;i>=close;i--) { // start at the end so we measure depth correctly
+	for(int i=MAX_PROGRAM_LENGTH-1;i>=close;i--) { // start at the end so we measure depth correctly
 		op_t pi = h->program[i];
 		
 		// update our array keeping track of depth, and penalize if we should
@@ -315,10 +315,55 @@ __device__ float compute_x1depth_prior(hypothesis* h) {
 }
 
 
+
+void enumerate_all_programs_rec( hypothesis* cur, int pos, int nopen, int maxdepth, int (*callback)(hypothesis*) ) {
+	// Call callback on each hypothesis generated, via enumeration
+	if(pos < MAX_PROGRAM_LENGTH-maxdepth) return;
+		
+	for(int oi=NOOP_+1;oi<NUM_OPS;oi++) { // START right after NOOP_, which must be first!
+		cur->program[pos] = oi;
+		int nowopen = nopen + (1-hNARGS[oi]); // CANNOT Use stack_change since that doesn't access hNARGS
+
+		if(nowopen == 0) {
+			// set the program length
+			cur->program_length = MAX_PROGRAM_LENGTH-pos;
+			
+			// count up the number of constants
+			cur->nconstants = 0;
+			for(int i=0;i<MAX_PROGRAM_LENGTH;i++){ cur->nconstants += (cur->program[i] == CONSTANT_); }
+			
+			// and initialize other parts
+			cur->check0 = CHECK_BIT; cur->check1 = CHECK_BIT; cur->check2 = CHECK_BIT; cur->check3 = CHECK_BIT; cur->check4 = CHECK_BIT; cur->check5 = CHECK_BIT; cur->check6 = CHECK_BIT;
+			
+			for(int i=0;i<MAX_CONSTANTS;i++) {
+				cur->constants[i] = 0.0; // just to start random_normal(RNG_ARGS);
+				cur->constant_types[i] = GAUSSIAN;
+			}
+// 			cur->posterior = -inf; // so that we don't count as the MAP initially
+
+			int keepgoing = callback(cur);
+			if(!keepgoing) break; // exit early
+		}
+		else {
+			enumerate_all_programs_rec(cur, pos-1, nowopen, maxdepth, callback);
+			cur->program[pos-1] = NOOP_; // undo this when we're done
+		}
+		
+	}
+}
+void enumerate_all_programs(int maxn, int maxdepth, int(*callback)(hypothesis*) ) {
+	assert(maxdepth <= MAX_PROGRAM_LENGTH);
+	
+	hypothesis* cur = new hypothesis();
+	for(int i=0;i<MAX_PROGRAM_LENGTH;i++) cur->program[i] = NOOP_; // initialize to zeros
+	
+	enumerate_all_programs_rec(cur, MAX_PROGRAM_LENGTH-1, -1, maxdepth, callback);
+}
+
 //------------
 // For easier displays
 const int MAX_OP_LENGTH = 256; // how much does each string add at most?
-char SS[MAX_MAX_PROGRAM_LENGTH*2][MAX_OP_LENGTH*MAX_MAX_PROGRAM_LENGTH]; 
+char SS[MAX_PROGRAM_LENGTH*2][MAX_OP_LENGTH*MAX_PROGRAM_LENGTH]; 
 
 void print_program_as_expression(FILE* fp, hypothesis* h) {
 	/*
@@ -326,16 +371,16 @@ void print_program_as_expression(FILE* fp, hypothesis* h) {
 	 * Currently these are set to play nice with sympy for processing output
 	 */
 	
-	char buf[MAX_MAX_PROGRAM_LENGTH*MAX_MAX_PROGRAM_LENGTH];
+	char buf[MAX_PROGRAM_LENGTH*MAX_PROGRAM_LENGTH];
 	
-	int top = MAX_MAX_PROGRAM_LENGTH; // top of the stack
+	int top = MAX_PROGRAM_LENGTH; // top of the stack
 	int constant_i = 0; // what constant are we pointing at?
-	int program_start = hMAX_PROGRAM_LENGTH-h->program_length;
+	int program_start = MAX_PROGRAM_LENGTH-h->program_length;
 	
 	// re-initialize our buffer
-	for(int r=0;r<MAX_MAX_PROGRAM_LENGTH*2;r++) strcpy(SS[r], "0"); // since everything initializes to 0
+	for(int r=0;r<MAX_PROGRAM_LENGTH*2;r++) strcpy(SS[r], "0"); // since everything initializes to 0
 	
-	for(int p=program_start;p<hMAX_PROGRAM_LENGTH;p++) { // NEED to start at the same place as virtual-machine (either 0 or program_start), or else consts can get out of sync!
+	for(int p=program_start;p<MAX_PROGRAM_LENGTH;p++) { // NEED to start at the same place as virtual-machine (either 0 or program_start), or else consts can get out of sync!
 		op_t op = h->program[p];
 		
 		switch(op) {

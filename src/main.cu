@@ -32,18 +32,20 @@ const float X_PENALTY = 10.0; // extra penalty for using X
 // in tree resampling, the expected length here is important in getting a good acceptance rate -- too low
 // (meaning too long) and we will reject almost everything
 const float EXPECTED_LENGTH = 5.0; // also the expected length of proposals
-const float PRIOR_XtoCONSTANT = 0.1; //what proportion of constant proposals are x (as opposed to all other constants)?
+const float PRIOR_XtoCONSTANT = 0.5; //what proportion of constant proposals are x (as opposed to all other constants)?
 
 #include "src/misc.cu"
 #include "src/__PRIMITIVES.cu"
 #include "src/data.cu"
 #include "src/hypothesis.cu"
+#include "src/constants.cu"
 #include "src/programs.cu"
 #include "src/mcmc-specification.cu"
 #include "src/mcmc-results.cu"
 #include "src/virtual-machine.cu"
 #include "src/hypothesis-array.cu"
 
+#include "src/kernels/MH-constant-kernel.cu"
 #include "src/kernels/MH-prior-kernel.cu"
 #include "src/kernels/MH-simple-kernel.cu"
 #include "src/kernels/MH-adaptive-temperature.cu"
@@ -53,9 +55,8 @@ const float PRIOR_XtoCONSTANT = 0.1; //what proportion of constant proposals are
 using namespace std;
 
 int N = 1024;  // Hw many chains?
-int NTOP = 1000; // store this many of the "top" hypotheses 
 
-const int BLOCK_SIZE = 128; // WOW 16 appears to be fastest here...
+const int BLOCK_SIZE = 128;
 int N_BLOCKS = 0; // set below
 const int HARDARE_MAX_X_BLOCKS = 1024;
 const int HARDWARE_MAX_THREADS_PER_BLOCK = 1024; // cannot exceed this many threads per block! For compute level 2.x and greater!
@@ -65,7 +66,8 @@ string OUT_PATH     = "run";
 
 int SEED = -1; // Random number seed (for replicability) if -1, we use time()
 
-int REPETITONS = 1; // how many outer loops do we repeat?
+int ENUMERATION_DEPTH = 8;
+
 int MCMC_ITERATIONS = 1000; 
 int OUTER_BLOCKS = 1;
 int BURN_BLOCKS = 0; // how many blocks (of MCMC_ITERATIONS each) do we burn-in? This is not sensible if we aren't using samples as samples
@@ -73,13 +75,23 @@ int BURN_BLOCKS = 0; // how many blocks (of MCMC_ITERATIONS each) do we burn-in?
 int FIRST_HALF_DATA = 0; // use only the first half of the data
 int EVEN_HALF_DATA  = 0; // use only the even half of the data
 
-int END_OF_BLOCK_ACTION = 2; // If 1, we resample from the prior at the beginning of each block. Else we continue
+int seed;
+
+// the output paths (defined below)
+string SAMPLE_PATH, MAP_PATH, TOP_PATH, ALL_TOP_PATH, LOG_PATH, PERFORMANCE_PATH;
+
+
+// These are shared arrays among all main functions:
+mcmc_results* host_mcmc_results;
+mcmc_specification* host_spec;
+datum* host_data;
+int DATA_LENGTH; // the amount of data
+
 
 static struct option long_options[] =
 	{	
 		{"in",           required_argument,    NULL, 'd'},
 		{"iterations",   required_argument,    NULL, 'i'},
-		{"repetitions",  required_argument,    NULL, 'R'},
 		{"N",            required_argument,    NULL, 'N'},
 		{"out",          required_argument,    NULL, 'O'},
 		{"outer",        required_argument,    NULL, 'o'},
@@ -96,106 +108,11 @@ static struct option long_options[] =
 	};  
 
 // --------------------------------------------------------------------------------------------------------------
+// Set the prior
 // --------------------------------------------------------------------------------------------------------------
-// --------------------------------------------------------------------------------------------------------------
-// main routine that executes on the host
-// --------------------------------------------------------------------------------------------------------------
-// --------------------------------------------------------------------------------------------------------------
-// --------------------------------------------------------------------------------------------------------------
-	
-int main(int argc, char** argv)
-{	
-	
-	// ----------------------------------------------------------------------------
-	// Parse command line
-	// -----------------------------------------------------------------------
-	int option_index = 0, opt=0;
-	while( (opt = getopt_long( argc, argv, "bp", long_options, &option_index )) != -1 )
-		switch( opt ) {
-			case 'd': in_file_path = optarg; break;
-			case 'i': MCMC_ITERATIONS = atoi(optarg); break;
-			case 'N': N = atoi(optarg); break;
-			case 'o': OUTER_BLOCKS = atoi(optarg); break;
-			case 'O': OUT_PATH = optarg; break;
-			case 'R': REPETITONS = atoi(optarg); break;
-			case 'b': BURN_BLOCKS = atoi(optarg); break;
-			case 's': SEED = (float)atof(optarg); break;
-			case 'f': FIRST_HALF_DATA = 1; break;
-			case 'm': END_OF_BLOCK_ACTION = atoi(optarg); break;
-			case 'e': EVEN_HALF_DATA = 1; break;
-			case 'L': set_MAX_PROGRAM_LENGTH(atoi(optarg)); break;
-			case '_': break; // don't do anything if we use all the data
-			case 'h': // help output:
-// 				cout << "Options: " << endl;
-// 				cout << "\t--max-base=N         sets the maximum base to N" << endl;
-// 				cout << "\t--max-power=N        sets the maximum power to N" << endl;
-				return 0;
-			default:
-				return 1;
-		}
-	
-	N_BLOCKS = N/BLOCK_SIZE + (N%BLOCK_SIZE == 0 ? 0:1);
-	
-	assert(N_BLOCKS < HARDARE_MAX_X_BLOCKS); // can have at most this many blocks
-	assert(N/N_BLOCKS <= HARDWARE_MAX_THREADS_PER_BLOCK); // MUST HAVE LESS THREADS PER BLOCK!!
-	
-	
-	// -----------------------------------------------------------------------
-	// Set up the output files etc
-	// -----------------------------------------------------------------------
-	
-	string SAMPLE_PATH = OUT_PATH+"/samples.txt";
-	string MAP_PATH = OUT_PATH+"/MAPs.txt";
-	string TOP_PATH = OUT_PATH+"/tops.txt"; // the top of the most recent repetition 
-	string ALL_TOP_PATH = OUT_PATH+"/all-tops.txt"; // the tops of each repetition are concatenated to this
-	string LOG_PATH = OUT_PATH+"/log.txt";
-	string PERFORMANCE_PATH = OUT_PATH+"/performance.txt";
-	
-	// -------------------------------------------------------------------------
-	// Make the RNG replicable
-	
-	int seed;
-	if(SEED==-1) {
-		srand(time(NULL));
-		seed = rand();
-	} 
-	else {
-		seed = SEED;
-	}
 
-	// -------------------------------------------------------------------------
-	// Write the log and performance log
-	
-	FILE* fp = fopen(LOG_PATH.c_str(), "w");
-	if(fp==NULL) { cerr << "*** ERROR: Cannot open file:\t" << LOG_PATH <<"\n"; exit(1);}
-	
-	fprintf(fp, "-----------------------------------------------------------------\n");
-	fprintf(fp, "-- Parameters:\n");
-	fprintf(fp, "-----------------------------------------------------------------\n");
-	fprintf(fp, "\tInput data path: %s\n", in_file_path.c_str());
-	fprintf(fp, "\tOutput path: %s\n", OUT_PATH.c_str());
-	fprintf(fp, "\tRepetitions: %i\n", REPETITONS);
-	fprintf(fp, "\tMCMC Iterations (per block): %i\n", MCMC_ITERATIONS);
-	fprintf(fp, "\tBlocks: %i\n", OUTER_BLOCKS);
-	fprintf(fp, "\tBurn Blocks: %i\n", BURN_BLOCKS);
-	fprintf(fp, "\tN chains: %i\n", N);
-	fprintf(fp, "\tSEED: %i\n", seed);
-	fprintf(fp, "\tEnd of block action: %i\n", END_OF_BLOCK_ACTION);
-	fprintf(fp, "\tMax program length: %i\n", hMAX_PROGRAM_LENGTH);
-	fprintf(fp, "\tX to constant proportion: %f\n", PRIOR_XtoCONSTANT);
-	
-	fprintf(fp, "\n\n");
-	fclose(fp);
-	
-	fp = fopen(PERFORMANCE_PATH.c_str(), "w");
-	if(fp==NULL) { cerr << "*** ERROR: Cannot open file:\t" << PERFORMANCE_PATH <<"\n"; exit(1);}
-	fprintf(fp, "repetition\tblock\tperfect.ll\tMAP.ll\tdevice.time\ttransfer.time\thost.time\tsamples.per.second\tf.per.second\tprimitives.per.second\ttransfer.mb.per.second\tacceptance.ratio\ttop.overlap.pct\tduplicate.pct\n");
-	fclose(fp);
-	
-	// -----------------------------------------------------------------------
-	// Set up the prior
-	// -----------------------------------------------------------------------
-	
+void define_prior() {
+
 	assert(NUM_OPS < MAX_NUM_OPS);  // check that we don't have too many for our array
 
 	// how many times have we seen each number of args?
@@ -204,7 +121,7 @@ int main(int argc, char** argv)
 		assert( hNARGS[i] <= 2); // we must have this to compute expected lengths correctly. It can be changed for arbitrary-arity later
 		count_args[ hNARGS[i]]++; 
 	}
-		
+	
 	/*
 	* The expected length satisfies:
 	* E = p0arg + p1arg(E+1) + p2arg(2 E + 1)
@@ -243,147 +160,67 @@ int main(int argc, char** argv)
 		else if( hNARGS[i] == 2) { hPRIOR[i] = P_2arg; }	
 	}
 
+	
 	// normalize the prior
 	double priorZ = 0.0;
 	for(int i=0;i<NUM_OPS;i++) priorZ += hPRIOR[i];
 	assert(abs(1.-priorZ) < 1e-3); // assert we computed the prior correctly!
 	for(int i=0;i<NUM_OPS;i++) hPRIOR[i] /= priorZ;
 
-	// and copy PRIOR over to the device
-	cudaMemcpyToSymbol(dPRIOR, hPRIOR, MAX_NUM_OPS*sizeof(float), 0, cudaMemcpyHostToDevice);
-	
-	// Echo the prior
-	fp = fopen(LOG_PATH.c_str(), "a");
-	if(fp==NULL) { cerr << "*** ERROR: Cannot open file:\t" << LOG_PATH <<"\n"; exit(1);}
-	
-	fprintf(fp, "\n-----------------------------------------------------------------\n");
-	fprintf(fp, "-- Prior:\n");
-	fprintf(fp, "-----------------------------------------------------------------\n");
-	for(int i=0;i<NUM_OPS;i++) 
-		fprintf(fp, "\t%i\t%s\t%f\n", i, NAMES[i], hPRIOR[i]);
-	fclose(fp);
+}
 
-	// -----------------------------------------------------------------------
-	// Read the data and set up some arrays
-	// -----------------------------------------------------------------------
-	
-	vector<datum>* data_vec = load_data_file(in_file_path.c_str(), FIRST_HALF_DATA, EVEN_HALF_DATA);
-	datum* host_data = &((*data_vec)[0]); // can do this with vectors now
-	
-	const int DLEN = data_vec->size();
-	const size_t DATA_BYTE_LEN = DLEN*sizeof(datum);
+// --------------------------------------------------------------------------------------------------------------
+// Run MCMC
+// --------------------------------------------------------------------------------------------------------------
 
-	// compute the maximum possible ll
-	// we can use this for the start of annealing temperature?
-	double PERFECT_LL = 0.0;
-	for(int di=0;di<DLEN;di++) {PERFECT_LL += lnormalpdf( 0.0, host_data[di].sd); }
-
-	// kinda like if we sampel from the prior, what should we expect?
-	double ZERO_LL = 0.0;
-	for(int di=0;di<DLEN;di++) {ZERO_LL += lnormalpdf( host_data[di].output, host_data[di].sd); }
-		
+void host_run_MCMC(int N, mcmc_specification* host_spec, mcmc_results* host_mcmc_results, datum* host_data) {
+	
+	// ----------------------
+	// Set up all of the bits
+	// ----------------------
+	
 	// and put this on the GPU
 	datum* device_data; 
-	cudaMalloc((void **) &device_data, DATA_BYTE_LEN);
-	cudaMemcpy(device_data, host_data, DATA_BYTE_LEN, cudaMemcpyHostToDevice);
-	
-	// Echo the data we actually run with (post-filtering for even/firsthalf)
-	fp = fopen(LOG_PATH.c_str(), "a");
-	fprintf(fp, "\n-----------------------------------------------------------------\n");
-	fprintf(fp, "-- Data:\n");
-	fprintf(fp, "-----------------------------------------------------------------\n");
-	for(int i=0;i<DLEN;i++) 
-		fprintf(fp, "\t%f\t%f\t%f\n", host_data[i].input, host_data[i].output, host_data[i].sd);
-	fclose(fp);
-	
-	// -----------------------------------------------------------------------
-	// Initialize RNG
-	// -----------------------------------------------------------------------
-	
-	// define random numbers:
-	int rx = rand();
-	
-	// this is how we seed each chain
-	long rng_seed = 0;
-	
-	// -----------------------------------------------------------------------
-	// Set up some bits...
-	// -----------------------------------------------------------------------
-	
-	// For locally manipulating hypotheses
-	size_t HYPOTHESIS_ARRAY_SIZE = N * sizeof(hypothesis);
-	hypothesis* host_hypotheses = new hypothesis[N]; 
-	hypothesis* host_hypothesis_tmp = new hypothesis[N]; 
-	hypothesis* host_out_MAPs = new hypothesis[N];
-	
-	int MCMC_RESULTS_SIZE = sizeof(mcmc_results)*N;
-	mcmc_results* host_mcmc_results = new mcmc_results[N];
-	mcmc_results* device_mcmc_results; cudaMalloc((void **) &device_mcmc_results, MCMC_RESULTS_SIZE); // device allocate
-	
-	// initialize this local array (copied to CUDA after any further changes)
-	for(int n=0;n<N;n++){
-		initialize(&(host_mcmc_results[n].MAP),    RNG_ARGS);
-		initialize(&(host_mcmc_results[n].sample), RNG_ARGS);
+	cudaMalloc((void **) &device_data,  DATA_LENGTH*sizeof(datum));
+	cudaMemcpy(device_data, host_data,  DATA_LENGTH*sizeof(datum), cudaMemcpyHostToDevice);
+	for(int i=0;i<N;i++) {
+		host_spec[i].data_length = DATA_LENGTH;
+		host_spec[i].data = device_data;
 	}
 	
-	// store the top hypotheses overall
-	hypothesis* host_top_hypotheses = new hypothesis[NTOP+2*N]; 
-	for(int i=0;i<NTOP+2*N;i++) initialize(&host_top_hypotheses[i], RNG_ARGS);
 	
-	// a special guy we keep  empty
-	hypothesis blankhyp; initialize(&blankhyp, RNG_ARGS);
-	
-	// Store these (used to compute number of duplicates among samples)
-	hypothesis* host_tmp_hypotheses = new hypothesis[N]; 
-	
-	// -----------------------------------------------------------------------
-	// Make the specification for mcmc steps, iterations, etc.
-	// -----------------------------------------------------------------------
-	
+	// and copy PRIOR over to the device
+	cudaMemcpyToSymbol(dPRIOR, hPRIOR, MAX_NUM_OPS*sizeof(float), 0, cudaMemcpyHostToDevice);
+
+	// And create and copy these results:
+	int MCMC_RESULTS_SIZE = sizeof(mcmc_results)*N;
+	mcmc_results* device_mcmc_results; cudaMalloc((void **) &device_mcmc_results, MCMC_RESULTS_SIZE); // device allocate
+
 	int NSPECSIZE = N*sizeof(mcmc_specification);
-	
-	mcmc_specification* host_spec = new mcmc_specification[N]; 
 	mcmc_specification* dev_spec; cudaMalloc((void **) &dev_spec, NSPECSIZE ); // device allocate
 
-	// And set up the specifications!
-	for(int i=0;i<N;i++) {
-		host_spec[i].prior_temperature = 1.0;
-		host_spec[i].likelihood_temperature = 1.0;
-		host_spec[i].acceptance_temperature = ACCEPTANCE_TEMPERATURE;
-		host_spec[i].iterations = MCMC_ITERATIONS; // how many steps to run?
-		host_spec[i].initialize = 1;
-		host_spec[i].rng_seed = 0; // set below
-		host_spec[i].data_length = DLEN;
-		host_spec[i].data = device_data;
-		// TODO: Max program length should be in here! But that's hard, unless that's also a feature of hyp...
-	}
+	// compute the maximum possible ll
+	double PERFECT_LL = 0.0;
+	for(int di=0;di<DATA_LENGTH;di++) {PERFECT_LL += lnormalpdf( 0.0, host_data[di].sd); }
 	
-	
-	// -----------------------------------------------------------------------
-	// Main loop
-	// -----------------------------------------------------------------------
 	
 	clock_t mytimer;
-		
-	for(int rep=0; rep<REPETITONS; rep++) { // how many repetitions do we do?
+	
+	// ----------------------
+	// Main loop
+	// ----------------------
 	for(int outer=0;outer<OUTER_BLOCKS+BURN_BLOCKS;outer++) {
 		double secDEVICE=0.0, secHOST=0.0, secTRANSFER=0.0; // how long do we spend on each?	
 		
-		// increase the max program length, as a form of tempering...
-		// set_MAX_PROGRAM_LENGTH(min(outer,MAX_MAX_PROGRAM_LENGTH));
-		
-		// Set the specifications
+		// Set up the rng (also we can anneal here if we want)
 		for(int i=0;i<N;i++) {
-			host_spec[i].initialize = (outer==0)||(END_OF_BLOCK_ACTION==1);
-			
-			host_spec[i].rng_seed = seed + rng_seed++; // set this seed
-
-			// THIS IS ANNEALING ON THE LIKELIHOOD
-// 			host_spec[i].likelihood_temperature = 1.0 + 1500.0 / float(outer+1.0);
+			host_spec[i].rng_seed = seed + (1+outer)*N*i; // set this seed
 		}
 		
 		mytimer = clock();
 		cudaMemcpy(dev_spec, host_spec, NSPECSIZE, cudaMemcpyHostToDevice);
+		
+		// copy these over, containing our initial hypotheses
 		cudaMemcpy(device_mcmc_results, host_mcmc_results, MCMC_RESULTS_SIZE, cudaMemcpyHostToDevice);
 		secTRANSFER += double(clock() - mytimer) / CLOCKS_PER_SEC;
 		
@@ -393,49 +230,56 @@ int main(int argc, char** argv)
 		mytimer = clock();
 		
 		cudaPrintfInit(); // set up cuPrintf
-                
-		cudaDeviceSynchronize(); 
-		MH_simple_kernel<<<N_BLOCKS,BLOCK_SIZE>>>(N, dev_spec, device_mcmc_results);
+                cudaDeviceSynchronize(); 
+		
+		MH_constant_kernel<<<N_BLOCKS,BLOCK_SIZE>>>(N, dev_spec, device_mcmc_results);
+// 		MH_simple_kernel<<<N_BLOCKS,BLOCK_SIZE>>>(N, dev_spec, device_mcmc_results);
 // 		MH_detect_local_maxima<<<N_BLOCKS,BLOCK_SIZE>>>(N, dev_spec, device_mcmc_results);
 // 		MH_adaptive_temperature_kernel<<<N_BLOCKS,BLOCK_SIZE>>>(N, dev_spec, device_mcmc_results);
 // 		MH_prior_kernel<<<N_BLOCKS,BLOCK_SIZE>>>(N, dev_spec, device_mcmc_results);
 		cudaDeviceSynchronize(); // wait for preceedings requests to finish
-// 		cudaError_t error = cudaGetLastError();
 		
 		cudaPrintfDisplay(stdout, true); // clean up cuPrintf
 		cudaPrintfEnd(); //
 		
-// 		if(error != cudaSuccess) {
-// 		// print the CUDA error message and exit
-// 		printf("CUDA error: %s\n", cudaGetErrorString(error));
-// 		exit(-1);
-// 		}
-
+		cudaError_t error = cudaGetLastError();
+		if(error != cudaSuccess) {
+			printf("CUDA error: %s\n", cudaGetErrorString(error));
+		}
 		
 		secDEVICE = double(clock() - mytimer) / CLOCKS_PER_SEC;
 		
 		////////////////////////////////////////// 
 		////////////////////////////////////////// 
 		
-				
 		// Retrieve result from device and store it in host array
 		mytimer = clock();
 		cudaMemcpy(host_mcmc_results, device_mcmc_results, MCMC_RESULTS_SIZE, cudaMemcpyDeviceToHost);
 		secTRANSFER += double(clock() - mytimer) / CLOCKS_PER_SEC;
 		
-		mytimer = clock(); // for timing the rest of host operations
+		// -----------------------------------------------------------------------------------------------------
+		// And translate them to a temporary "hist_hypotheses" array
 		
-		// and copy the host hypotheses over to hosts and maps
-		for(int i=0;i<N;i++){ 
-// 			cerr <<  i << "\t" << host_mcmc_results[i].sample.posterior << endl;
-			COPY_HYPOTHESIS( &host_hypotheses[i], &(host_mcmc_results[i].sample));
-			COPY_HYPOTHESIS( &host_out_MAPs[i],   &(host_mcmc_results[i].MAP));
-		}		
+		// For locally manipulating hypotheses -- just for displaying
+		mytimer = clock(); // for timing the rest of host operations
+		hypothesis* host_hypotheses = new hypothesis[N]; 
+		hypothesis* host_out_MAPs   = new hypothesis[N];
+	
+		for(int i=0;i<N;i++) {
+			COPY_HYPOTHESIS( &(host_hypotheses[i]), &(host_mcmc_results[i].sample) );
+			COPY_HYPOTHESIS( &(host_out_MAPs[i]),   &(host_mcmc_results[i].MAP) );
+		}	
 		
 		// sort them as required below
 		qsort( (void*)host_hypotheses, N, sizeof(hypothesis), hypothesis_posterior_compare);
 		qsort( (void*)host_out_MAPs,   N, sizeof(hypothesis), hypothesis_posterior_compare);
 		
+		// Save results. But not for burn blocks
+		if(outer >= BURN_BLOCKS) {
+			dump_to_file(SAMPLE_PATH.c_str(), host_hypotheses, 0, outer, N, 1); // dump samples
+			dump_to_file(MAP_PATH.c_str(),    host_out_MAPs,   0, outer, N, 1); // dump maps
+		}
+
 		// make sure our check bits have not changed -- that we didn't overrun anything
 		for(int rank=0; rank<N; rank++){
 			assert(host_hypotheses[rank].check0 == CHECK_BIT);
@@ -446,40 +290,11 @@ int main(int argc, char** argv)
 			assert(host_hypotheses[rank].check5 == CHECK_BIT);
 			assert(host_hypotheses[rank].check6 == CHECK_BIT);
 		}
-
-		// -----------------------------------------------------------------------------------------------------
-		// Save results. But not for burn blocks
 		
-		// print out
-		if(outer >= BURN_BLOCKS) {
-			dump_to_file(SAMPLE_PATH.c_str(), host_hypotheses, rep, outer, N, 1); // dump samples
-			dump_to_file(MAP_PATH.c_str(), host_out_MAPs, rep, outer, N, 1); // dump maps
-		}
+		delete[] host_hypotheses;
+		delete[] host_out_MAPs;
 		
-		// -----------------------------------------------------------------------------------------------------
-		// Manage our collection of the top hypotheses (here: samples, not MAPs)
-		// we put these in host_top_hypotheses, and the first NTOP of these always stores the best
-		// we maintain this by copying all of host_out_MAPs to the end, resorting, and removing duplicates
-		
-		memcpy( (void*)&host_top_hypotheses[NTOP],   (void*)host_out_MAPs, HYPOTHESIS_ARRAY_SIZE); // put these at the end
-		memcpy( (void*)&host_top_hypotheses[NTOP+N], (void*)host_hypotheses, HYPOTHESIS_ARRAY_SIZE); // put these at the end
-		
-		
-		// resort, best first, putting duplicate programs next to each other
- 		qsort(  (void*)host_top_hypotheses, NTOP+2*N, sizeof(hypothesis), sort_bestfirst_unique); 
-		// and now delete duplicates
-		int top_unique_count = delete_duplicates(host_top_hypotheses, NTOP, NTOP+2*N, &blankhyp);
-		// and save this
-		dump_to_file(TOP_PATH.c_str(), host_top_hypotheses, rep, outer, NTOP, 0);
-		
-		// Also, comput ein our sample how many are duplicates
-		memcpy( (void*)host_tmp_hypotheses, (void*)host_hypotheses, HYPOTHESIS_ARRAY_SIZE);
-		int unique_count = delete_duplicates(host_tmp_hypotheses, N, N, &blankhyp);
-		
-		
-		// -----------------------------------------------------------------------------------------------------
 		// Now how to handle the end of a "block" -- what update do we do?
-			
 		secHOST = double(clock() - mytimer) / CLOCKS_PER_SEC;
 		
 		// -----------------------------------------------------------------------------------------------------
@@ -488,7 +303,7 @@ int main(int argc, char** argv)
 		double secTOTAL = secHOST + secTRANSFER + secDEVICE;
 		
 		unsigned long total_primitives = 0; // count up *approximately* how many primitives were evaluated
-		for(int i=0;i<N;i++) total_primitives += host_hypotheses[i].program_length;
+		for(int i=0;i<N;i++) total_primitives += host_mcmc_results[i].sample.program_length;
 		
 		double AR_mean=0.0; // get the accept/reject mean
 		for(int i=0;i<N;i++) 
@@ -496,43 +311,283 @@ int main(int argc, char** argv)
 		AR_mean /= float(N);
 		
 		FILE* fp = fopen(PERFORMANCE_PATH.c_str(), "a");
-		fprintf(fp, "%i\t%i\t%.2f\t%.2f\t%.6f\t%.6f\t%.6f\t%.2f\t%.2f\t%.2f\t%.2f\t%.5f\t%.4f\t%.4f\n",
-			rep, 
+		fprintf(fp, "%i\t%i\t%.2f\t%.2f\t%.6f\t%.6f\t%.2f\t%.2f\t%.2f\t%.2f\t%.5f\n",
+			0, 
 			outer, 
 			PERFECT_LL,
-			host_top_hypotheses[0].likelihood, 
 			secDEVICE, 
 			secTRANSFER, 
 			secHOST, 
 			double(N)*double(MCMC_ITERATIONS)/ secTOTAL,
-			double(N)*double(MCMC_ITERATIONS)*double(DLEN)/secTOTAL,
-			double(MCMC_ITERATIONS)*double(DLEN)*double(total_primitives)/secTOTAL, 
-			double(HYPOTHESIS_ARRAY_SIZE*2)/(1048576. * secTRANSFER),
-       			AR_mean,
-			float(top_unique_count) / float(N),
-			float(unique_count) / float(N)
+			double(N)*double(MCMC_ITERATIONS)*double(DATA_LENGTH)/secTOTAL,
+			double(MCMC_ITERATIONS)*double(DATA_LENGTH)*double(total_primitives)/secTOTAL, 
+			double(N*MCMC_RESULTS_SIZE)/(1048576. * secTRANSFER),
+       			AR_mean
 		);
-			
+		
 		fclose(fp);
 	
 	} // end outer loop 
 	
-	dump_to_file(ALL_TOP_PATH.c_str(), host_top_hypotheses, rep, OUTER_BLOCKS, NTOP, 1);
+	// and clean up
+	cudaFree(device_data);
+	cudaFree(dev_spec);
+	cudaFree(device_mcmc_results);
 	
-	} // end repetitions
+}
+
+
+// --------------------------------------------------------------------------------------------------------------
+// Enumeration procedure for hypotheses
+// --------------------------------------------------------------------------------------------------------------
+
+
+// Determine any constraints on what can and cannot be allowed in a potential hypothesis
+bool check_in_enumeration(hypothesis* h){
+	// 	// Do some checks -- should we keep this?
+	int found_X = 0; // require X (non-constant)
+	int found_CONSTANT = 0; // and C (uses some constants)
+	
+	for(int i=0;i<MAX_PROGRAM_LENGTH;i++){
+		
+		op_t oi = h->program[i];
+		op_t oip1 = NOOP_;
+		if(i < MAX_PROGRAM_LENGTH-1) oip1 = h->program[i+1];
+		
+		// TODO: CLEAN UP THESE CONSTRAINTS!
+		if( oi==NEG_ && oip1==NEG_) return 0; // no double negatives		
+		if( (oi==ONE_) && (oip1==MUL_ || oip1==DIV_ || oip1==LOG_ || oip1==POW_) ) return 0; // none of these operations make sense
+		if( (oi==ZERO_) && (oip1==MUL_ || oip1==DIV_ || oip1==ADD_ || oip1==SUB_ || oip1==LOG_ || oip1==EXP_ || oip1==POW_) ) return 0; // none of these operations make sense
+		
+		if(h->program[i] == X_) found_X = 1;
+		if(h->program[i] == CONSTANT_) found_CONSTANT = 1;
+		
+		
+		
+	}
+	
+	return ( found_X && found_CONSTANT);
+}
+
+int enum_hyp_i=0;
+// int add_hypothesis( hypothesis* h ) {
+// 	if( enum_hyp_i >= N) return 0; // can't keep going!
+// 		
+// 	if(check_in_enumeration(h)) {
+// 		
+// 	// else add:		
+// 	memcpy( (void*)&(host_mcmc_results[enum_hyp_i].sample), (void*)h, sizeof(hypothesis) );
+// 	memcpy( (void*)&(host_mcmc_results[enum_hyp_i].MAP),    (void*)h, sizeof(hypothesis) );
+// 	enum_hyp_i++;
+// 	
+// 	return 1;
+// 	}
+// 	else return 0;
+// }
+
+
+
+int run_all_hypotheses( hypothesis* h ) {
+	
+	if(! check_in_enumeration(h) ) return 1; //  don't use, but keep going
+	
+	// else add:		
+	memcpy( (void*)&(host_mcmc_results[enum_hyp_i].sample), (void*)h, sizeof(hypothesis) );
+	memcpy( (void*)&(host_mcmc_results[enum_hyp_i].MAP),    (void*)h, sizeof(hypothesis) );
+	enum_hyp_i++;
+
+	if( enum_hyp_i >= N) {
+		assert(enum_hyp_i == N);
+		
+		// And run one
+		host_run_MCMC(N, host_spec, host_mcmc_results, host_data);
+		
+		
+		// and reset
+		enum_hyp_i = 0;
+	}
+
+	
+	return 1;
+}
+
+
+
+// --------------------------------------------------------------------------------------------------------------
+// --------------------------------------------------------------------------------------------------------------
+// --------------------------------------------------------------------------------------------------------------
+// main routine that executes on the host
+// --------------------------------------------------------------------------------------------------------------
+// --------------------------------------------------------------------------------------------------------------
+// --------------------------------------------------------------------------------------------------------------
+
+int main(int argc, char** argv)
+{	
+	
+	// ----------------------------------------------------------------------------
+	// Parse command line
+	// -----------------------------------------------------------------------
+	int option_index = 0, opt=0;
+	while( (opt = getopt_long( argc, argv, "bp", long_options, &option_index )) != -1 )
+		switch( opt ) {
+			case 'd': in_file_path = optarg; break;
+			case 'i': MCMC_ITERATIONS = atoi(optarg); break;
+			case 'N': N = atoi(optarg); break;
+			case 'o': OUTER_BLOCKS = atoi(optarg); break;
+			case 'O': OUT_PATH = optarg; break;
+			case 'b': BURN_BLOCKS = atoi(optarg); break;
+			case 's': SEED = (float)atof(optarg); break;
+			case 'f': FIRST_HALF_DATA = 1; break;
+			case 'e': EVEN_HALF_DATA = 1; break;
+			case '_': break; // don't do anything if we use all the data
+			default: return 1; // unspecified
+		}
+	
+	N_BLOCKS = N/BLOCK_SIZE + (N%BLOCK_SIZE == 0 ? 0:1);
+	
+	assert(N_BLOCKS < HARDARE_MAX_X_BLOCKS); // can have at most this many blocks
+	assert(N/N_BLOCKS <= HARDWARE_MAX_THREADS_PER_BLOCK); // MUST HAVE LESS THREADS PER BLOCK!!
+	
+	// -----------------------------------------------------------------------
+	// Set up the output files etc
+	// -----------------------------------------------------------------------
+	
+	SAMPLE_PATH = OUT_PATH+"/samples.txt";
+	MAP_PATH = OUT_PATH+"/MAPs.txt";
+	TOP_PATH = OUT_PATH+"/tops.txt"; // the top of the most recent repetition 
+	ALL_TOP_PATH = OUT_PATH+"/all-tops.txt"; // the tops of each repetition are concatenated to this
+	LOG_PATH = OUT_PATH+"/log.txt";
+	PERFORMANCE_PATH = OUT_PATH+"/performance.txt";
+// 	string H0_PATH          = OUT_PATH+"/h0.txt"; // what were our initial hypotheses?
+	
+	// -------------------------------------------------------------------------
+	// Make the RNG replicable
+	
+	if(SEED==-1) {
+		srand(time(NULL));
+		seed = rand();
+	} 
+	else {  seed = SEED; }
+
+	// -------------------------------------------------------------------------
+	// Write the log and performance log
+	
+	FILE* fp = fopen(LOG_PATH.c_str(), "w");
+	if(fp==NULL) { cerr << "*** ERROR: Cannot open file:\t" << LOG_PATH <<"\n"; exit(1);}
+	
+	fprintf(fp, "-----------------------------------------------------------------\n");
+	fprintf(fp, "-- Parameters:\n");
+	fprintf(fp, "-----------------------------------------------------------------\n");
+	fprintf(fp, "\tInput data path: %s\n", in_file_path.c_str());
+	fprintf(fp, "\tOutput path: %s\n", OUT_PATH.c_str());
+	fprintf(fp, "\tMCMC Iterations (per block): %i\n", MCMC_ITERATIONS);
+	fprintf(fp, "\tBlocks: %i\n", OUTER_BLOCKS);
+	fprintf(fp, "\tBurn Blocks: %i\n", BURN_BLOCKS);
+	fprintf(fp, "\tN chains: %i\n", N);
+	fprintf(fp, "\tSEED: %i\n", seed);
+	fprintf(fp, "\tENUMERATION_DEPTH: %i", ENUMERATION_DEPTH);
+	fprintf(fp, "\tMax program length: %i\n", MAX_PROGRAM_LENGTH);
+	fprintf(fp, "\tX to constant proportion: %f\n", PRIOR_XtoCONSTANT);
+	
+	fprintf(fp, "\n\n");
+	fclose(fp);
+	
+	fp = fopen(PERFORMANCE_PATH.c_str(), "w");
+	if(fp==NULL) { cerr << "*** ERROR: Cannot open file:\t" << PERFORMANCE_PATH <<"\n"; exit(1);}
+	fprintf(fp, "repetition\tblock\tperfect.ll\tMAP.ll\tdevice.time\ttransfer.time\thost.time\tsamples.per.second\tf.per.second\tprimitives.per.second\ttransfer.mb.per.second\tacceptance.ratio\ttop.overlap.pct\tduplicate.pct\n");
+	fclose(fp);
+	
+	// -----------------------------------------------------------------------
+	// Set up the prior
+	// -----------------------------------------------------------------------
+	
+	// Define the prior (above)
+	define_prior();
+
+	// Echo the prior
+	fp = fopen(LOG_PATH.c_str(), "a");
+	if(fp==NULL) { cerr << "*** ERROR: Cannot open file:\t" << LOG_PATH <<"\n"; exit(1);}
+	
+	fprintf(fp, "\n-----------------------------------------------------------------\n");
+	fprintf(fp, "-- Prior:\n");
+	fprintf(fp, "-----------------------------------------------------------------\n");
+	for(int i=0;i<NUM_OPS;i++) 
+		fprintf(fp, "\t%i\t%s\t%f\n", i, NAMES[i], hPRIOR[i]);
+	fclose(fp);
+	
+	// -----------------------------------------------------------------------
+	// Read the data and set up some arrays
+	// -----------------------------------------------------------------------
+	
+	vector<datum>* data_vec = load_data_file(in_file_path.c_str(), FIRST_HALF_DATA, EVEN_HALF_DATA);
+	host_data = &((*data_vec)[0]); // can do this with vectors now
+	DATA_LENGTH = data_vec->size();
+	
+	
+	// Echo the data we actually run with (post-filtering for even/firsthalf)
+	fp = fopen(LOG_PATH.c_str(), "a");
+	fprintf(fp, "\n-----------------------------------------------------------------\n");
+	fprintf(fp, "-- Data:\n");
+	fprintf(fp, "-----------------------------------------------------------------\n");
+	for(int i=0;i<DATA_LENGTH;i++) 
+		fprintf(fp, "\t%f\t%f\t%f\n", host_data[i].input, host_data[i].output, host_data[i].sd);
+	fclose(fp);
+	
+	// -----------------------------------------------------------------------
+	// Define a blank hypothesis to initialize everything with
+	// -----------------------------------------------------------------------
+	
+	hypothesis blankhyp;
+	blankhyp.program_length=0;
+	blankhyp.posterior = -1./0.;
+	for(int i=0;i<MAX_PROGRAM_LENGTH;i++) { blankhyp.program[i] = NOOP_; }
+	for(int i=0;i<MAX_CONSTANTS;i++) { 
+		blankhyp.constants[i] = 0.0;
+		blankhyp.constant_types[i] = GAUSSIAN;
+		
+	}
+	blankhyp.check0 = CHECK_BIT; blankhyp.check1 = CHECK_BIT; blankhyp.check2 = CHECK_BIT; blankhyp.check3 = CHECK_BIT; blankhyp.check4 = CHECK_BIT; blankhyp.check5 = CHECK_BIT; blankhyp.check6 = CHECK_BIT;
+	
+	// -----------------------------------------------------------------------
+	// Set up the results and specifications locally
+	// -----------------------------------------------------------------------
+		
+	host_mcmc_results = new mcmc_results[N]; // this holds the hypothese we start and stop with
+	host_spec = new mcmc_specification[N]; 
+
+	// and copy over
+	for(int i=0;i<N;i++){
+		COPY_HYPOTHESIS( &(host_mcmc_results[i].sample), &blankhyp);
+	}
+	
+	// -----------------------------------------------------------------------
+	// Enumerate the hypotheses
+	// -----------------------------------------------------------------------
+	
+	// Set the specifications
+	for(int i=0;i<N;i++) {
+		host_spec[i].prior_temperature = 1.0;
+		host_spec[i].likelihood_temperature = 1.0;
+		host_spec[i].acceptance_temperature = ACCEPTANCE_TEMPERATURE;
+		host_spec[i].iterations = MCMC_ITERATIONS; // how many steps to run?
+		host_spec[i].initialize = 0;
+	}
+		
+	// To run successively with enumeration (for larger enumeration)
+	// This uses host_mcmc_results to store the mcmc results, etc. 
+	enumerate_all_programs( N, ENUMERATION_DEPTH, run_all_hypotheses);
+	host_run_MCMC(N, host_spec, host_mcmc_results, host_data); // then we still have to run the partially-filled one!
+	
+	
+	/// To enumerate a fixed set and run:
+// 	enumerate_all_programs( N, ENUMERATION_DEPTH, add_hypothesis);
+// 	host_run_MCMC(N, host_spec, host_mcmc_results, host_data);
 	
 	// -----------------------------------------------------------------------
 	// Cleanup
 	// -----------------------------------------------------------------------
 	
-	delete[] host_hypotheses;
-	delete[] host_hypothesis_tmp;
 	delete[] host_data;
 	delete[] host_mcmc_results;
 	delete[] host_spec;
-	
-	cudaFree(device_data);
-	cudaFree(dev_spec);
-	cudaFree(device_mcmc_results);
-	
 }

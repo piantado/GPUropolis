@@ -109,9 +109,9 @@ void dump_to_file(const char* path, hypothesis* ar, int repn, int outern, int N,
 			h->program_length);
 		
 		//print out the program
-// 		fprintf(fp,"\"");
-// 		for(int i=0;i<hMAX_PROGRAM_LENGTH;i++) fprintf(fp, "%d ", h->program[i]);
-// 		fprintf(fp,"\"\t");		
+		fprintf(fp,"\"");
+		for(int i=0;i<MAX_PROGRAM_LENGTH;i++) fprintf(fp, "%d ", h->program[i]);
+		fprintf(fp,"\"\t");		
 // 		
 		// print out constant types
 // 		fprintf(fp,"\"");

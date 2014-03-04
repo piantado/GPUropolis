@@ -18,18 +18,14 @@ parser = argparse.ArgumentParser(description='Clone of GPUroplis in LOTlib')
 parser.add_argument('--in', dest='in', type=str, default='../data-sources/Science/Boyle/data.txt', nargs="?", help='The data file')
 parser.add_argument('--out', dest='out', type=str, default='run', nargs="?", help='Output directory')
 
-parser.add_argument('--steps', dest='steps', type=int, default=5000, nargs="?", help='Number of steps')
-parser.add_argument('--skip', dest='skip', type=int, default=10, nargs="?", help='Skip in chains')
+parser.add_argument('--steps', dest='steps', type=int, default=50000, nargs="?", help='Number of steps')
+parser.add_argument('--skip', dest='skip', type=int, default=100, nargs="?", help='Skip in chains')
 #parser.add_argument('--N', dest='N', type=int, default=1, nargs="?", help='Number of chains')
 
 args = vars(parser.parse_args())
 
 PRIOR_TEMPERATURE = 1.0
-# LL_TEMPERATURE = 1.0
-# ACCEPTANCE_TEMPERATURE
 
-EXPECTED_LENGTH = 5
-PRIOR_XtoCONSTANT = 0.1
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # Load and set up the data
@@ -38,6 +34,9 @@ data = [ FunctionData(input=[x], output=y, ll_sd=sd) for x,y,sd in zip(*load_dat
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # Define the grammar
+
+EXPECTED_LENGTH = 5
+PRIOR_XtoCONSTANT = 0.1
 
 P =  (1.0-1.0/EXPECTED_LENGTH)/3.0 # Helper variable for defining probs
 P_0arg = 1.0-2.*P
@@ -65,12 +64,13 @@ G.add_rule('EXPR', 'EXP', ['EXPR'], P1)
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # Run
-from LOTlib.Inference.IncreaseTemperatureMH import increase_temperature_mh_sample
- 
+
 h0 = GPUropolisHypothesis(G, prior_temperature=PRIOR_TEMPERATURE)
-#for x in increase_temperature_mh_sample(h0, data, args['steps'], skip=args['skip'], trace=True, increase_amount=1.01):
+
+from LOTlib.Inference.IncreaseTemperatureMH import increase_temperature_mh_sample
+for x in increase_temperature_mh_sample(h0, data, args['steps'], skip=args['skip'], trace=True, increase_amount=1.005):
 	
-for x in mh_sample(h0, data, args['steps'], skip=args['skip'], trace=True):
+#for x in mh_sample(h0, data, args['steps'], skip=args['skip'], trace=True):
 	pass
 	#print x.posterior_score, x
 	

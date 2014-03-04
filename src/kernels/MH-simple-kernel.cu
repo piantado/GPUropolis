@@ -25,7 +25,7 @@ __global__ void MH_simple_kernel(int N, mcmc_specification* all_spec, mcmc_resul
 	datum* data                  = spec->data;
 	
 	// set up our data stack array
-	data_t stack[MAX_MAX_PROGRAM_LENGTH+1];
+	data_t stack[MAX_PROGRAM_LENGTH+1];
 	
 	// Set up for the RNG
 	int rx = spec->rng_seed;
