@@ -1,0 +1,11 @@
+# Investigate distribution around some large constant number
+0	1000	1.0
+1	1000	1.0
+2	1000	1.0
+3	1000	1.0
+4	1000	1.0
+5	1000	1.0
+6	1000	1.0
+7	1000	1.0
+8	1000	1.0
+9	1000	1.0

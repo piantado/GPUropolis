@@ -5,13 +5,13 @@ const int NUM_OPS=13;
 
 
 
-enum OPS { NOOP_=0,CONSTANT_=1,X_=2,ZERO_=3,ONE_=4,EXP_=5,LOG_=6,NEG_=7,MUL_=8,POW_=9,ADD_=10,DIV_=11,SUB_=12};
+enum OPS { NOOP_=0,CONSTANT_=1,X_=2,ZERO_=3,ONE_=4,EXP_=5,NEG_=6,LOG_=7,MUL_=8,ADD_=9,SUB_=10,DIV_=11,POW_=12};
 
 
 
 __device__ const int NARGS[]  = {0, 0,0,0,0,1,1,1,2,2,2,2,2 };
  const int hNARGS[] = {0, 0,0,0,0,1,1,1,2,2,2,2,2 };
- const char* NAMES[] = { "<NA>", "constant","x","zero","one","exp","log","neg","mul","pow","add","div","sub" };
+ const char* NAMES[] = { "<NA>", "constant","x","zero","one","exp","neg","log","mul","add","sub","div","pow" };
 
  // Non-defined primitives, used potentially by print_program_as_expression
 

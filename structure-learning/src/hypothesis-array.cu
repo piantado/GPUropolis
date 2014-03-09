@@ -119,9 +119,9 @@ void dump_to_file(const char* path, hypothesis* ar, int repn, int outern, int N,
 // 		fprintf(fp,"\"\t");
 
 		// print out constants
-// 		fprintf(fp,"\"");
-// 		for(int i=0;i<MAX_CONSTANTS;i++) fprintf(fp, "%.3f ", h->constants[i]);
-// 		fprintf(fp,"\"\t");			
+		fprintf(fp,"");
+		for(int i=0;i<MAX_CONSTANTS;i++) fprintf(fp, "%.3f\t", h->constants[i]);
+		fprintf(fp,"\t");			
 		
 		fprintf(fp, "\"");
 		print_program_as_expression(fp, h );

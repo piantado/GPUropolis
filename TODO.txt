@@ -1,0 +1,53 @@
+NOTES:
+	--> Make it so that when we get nans, we resample at random from the constants
+
+`	--> A crossover block move where we scramble up a bit?
+	--> Fix our RNG situation so we have our own class and state that can be defined as an object
+	--> Try tempering on the prior?
+	--> SORT PEARSON STATS
+	- Mode resampling: estimate the volume in each mode (structure), and then resample chains accordingly
+		So two stages: first sample over structures, then sample over constants given structures (within a mode)
+		- The first should be sampling within modes, but otherwise can be pure search
+		- the second 
+		-- AHH SO IN PYTHON, WE CAN JUST ESTIMATE IN THIS STRATIFIED WAY -- WEIGHT THE STRUCTURAL SAMPLES BY THE P OF STRUCTURE, INTEGRATING OVER CONSTANTS (ESTIAMTED FROM SAMPLES)
+		
+	- ADD STATS EXAMPLES: POSTERIOR ON PARAMETERS FOR LINEAR, LOGIT, ARBITRARY BAYESIAN MODEL
+
+	- Hmm maybe do we gain anythign by thinking about a single sample as one from the predictive posterior, and looking for autocorrelations (within a chain) there?
+	- So the posterior predictive likelihood is strongly driven by outliers -- which makes sense -- we have clumpiness, with some clumps on crazy hypotheses. So probably sng the posterior trimmed ll is better...
+		-- In other words, teh likelihood is NOT robustly estimated because it is sensitive to a single outlier point!
+		
+		
+	-- Oh interesting, we can also get a model R^2, the residual variance	
+TODO LIST:
+	-->  HMM, I THINK WE WANT A MEDIAN PREDICTIVE POSTERIOR -- TRIM THE TAILS AT EACH DATA POINT, OR ELSE WE INTRODUCE CRAZY...
+	
+	
+	--> In plotting / comparisons -- add: Gaussian process, generalized additive model
+	
+	-- FIX nopen -- is this doing the right thing?? Shouldn't we take -nopen (negative nopen) everywhere??
+	- Add some assertiosn around to be really sure it's doing what we want
+	
+	- Check the data and physics params. 
+		- Is Boyle data right?
+
+	- Save the MCMC state and allow resuming
+	- Debug and optimize insert/delete
+	
+
+DATA SETS TO ADD:
+	- unsolved asymptotics in number theory?
+	- logistic map -- recover the equation, even when it looks like garbage
+	- http://en.wikipedia.org/wiki/Ives%E2%80%93Stilwell_experiment
+	- http://en.wikipedia.org/wiki/Titius%E2%80%93Bode_law
+	- polynomials
+	-  y=a \cos(bX) + b \sin(aX) 
+	- http://www.amstat.org/publications/jse/jse_data_archive.htm -- galileo data set
+	- Distributions: 
+	        - maxwell-boltzman
+		- test for normality
+		- that coin data
+		- Zipfian power law
+
+	- NIST Nonlinear Regression Data Sets
+	

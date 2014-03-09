@@ -11,12 +11,10 @@ NVCC_FLAGS=-m64 -gencode arch=compute_30,code=sm_30 -use_fast_math
 # -use_fast_math forces everything to compile to __exp(x) versions, instead of slower and more accurate exp(x) versions...
 
 all: main.o
-	# To see registers etc:
-	# --ptxas-options=-v
 	g++ -m64 -o gpumcmc main.o -L$(CUDA_LIB) -lcudart
 	rm main.o
 	 
-main.o: src/*.cu src/kernels/*
+main.o: src/*.cu
 
 	nvcc $(NVCC_FLAGS) -I$(CUDA_INCLUDE) -I. -I$(CUDA_SAMPLES_INCLUDE) -o main.o -c src/main.cu 
 	

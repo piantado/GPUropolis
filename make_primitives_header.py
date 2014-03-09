@@ -67,6 +67,8 @@ if "SUB_" not in names: print >>primitives, "#define SUB_ -993" # so that code d
 if "MUL_" not in names: print >>primitives, "#define MUL_ -994" # so that code doesn't crash that uses this
 if "DIV_" not in names: print >>primitives, "#define DIV_ -995" # so that code doesn't crash that uses this
 if "POW_" not in names: print >>primitives, "#define POW_ -996" # so that code doesn't crash that uses this
+if "LOG_" not in names: print >>primitives, "#define LOG_ -997" # so that code doesn't crash that uses this
+if "EXP_" not in names: print >>primitives, "#define EXP_ -998" # so that code doesn't crash that uses this
 
 primitives.close()
 

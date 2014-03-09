@@ -1,0 +1,72 @@
+/*
+
+	Definitions of primitive operations and constants, and an ENUM to keep track of them all
+
+*/
+
+// https://en.wikipedia.org/wiki/Physical_constant
+C_ = 2.99792458e8; // m s^-1
+G_ = 6.67384e-11; // M^3 kg^-1 s^-2
+h_ = 6.62606957e-34; // plank's constant
+
+
+// Number theory: mod,etc, maybe have it work on ints
+// Physics: 
+// Mathematics
+
+enum OPS { 
+	NOOP, // keep this as zero -- its necess
+	ONE,
+	PI,
+	E,
+	
+	
+	// 2-ary operations
+	ADD, 
+	SUB, 
+	MUL, 
+	DIV, 
+	POW,
+	
+	// 1-ary operations
+	NEG, 
+	LOG, 
+	EXP, 
+	SIN, 
+	ASIN,
+	COS,
+	ACOS,
+	TAN,
+	ATAN,
+	
+	
+	NUM_OPS // the total length of ops and constants
+}
+
+char* ALL_OPS[100];
+OP[0]="ADD"; 
+OP[0]="ADD"; 
+
+
+int idx = 0x0;
+
+// make a macro to define this like an enum, but with the lower two bits holding the number of arguments
+#define DEFOP(name,narg) const int name = (idx << 2) | narg; ALL_OPS[idx] = "name"; idx++;
+
+
+DEFOP( ADD, 2 )  
+DEFOP( SUB, 2 )
+DEFOP( MUL, 2 )
+DEFOP( DIV, 2 )
+DEFOP( POW, 2 )
+
+DEFOP( NEG, 1)
+DEFOP( LOG, 1)
+DEFOP( EXP, 1)
+DEFOP( SIN, 1)
+DEFOP( ASIN, 1)
+
+
+
+
+
