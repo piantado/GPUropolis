@@ -18,8 +18,8 @@ WHICHHALF=all
 
 # DATA=data-sources/Regression/-10_20
 # for DATA in $(ls -d data-sources/Regression/*); do
-# DATA=../data-sources/Science/BalmerSeries
-DATA=../data-sources/Stats/Logistic
+# DATA=data-sources/Science/BalmerSeries
+DATA=data-sources/Stats/Logistic
 # for WHICHHALF in 'first-half' 'even-half' 'all' ; do
 # for DATA in $(ls -d data-sources/Science/*) ; do
 # for DATA in $(ls -d data-sources/Science/*)  $(ls -d data-sources/Stats/*) $(ls -d data-sources/NIST/*) ; do
