@@ -42,17 +42,16 @@
 // 
 #define RNG_DEF int& rx
 #define RNG_ARGS rx
-#define MY_RAND_MAX_32 ((1U << 31) - 1)
 #define MY_RAND_MAX ((1U << 15) - 1)
 // for use on the host:
 
 // A linear congruential 
  __device__ __host__ int random_int(int n, RNG_DEF) {
 
-	//http://rosettacode.org/wiki/Linear_congruential_generator#C
-	int r = (rx = (rx * 214013 + 2531011) & MY_RAND_MAX_32) >> 16;
+	//http://rosettacode.org/wiki/Linear_congruential_generator#C (WOW, error on that page -- should be % not &)
+	rx = (rx * 1103515245 + 12345) % MY_RAND_MAX;
 	
-	float p = float(r)/float(MY_RAND_MAX+1);
+	float p = float(rx)/float(MY_RAND_MAX+1);
 	
 	return int(p*n);
 }
