@@ -24,6 +24,14 @@ const float P_X = -0.7985077;        // log(0.45);
 const float P_CONSTANT = -0.7985077; // log(0.45);
 const float P_F = -2.302585;         // log(0.1);
 
+const float CONSTANT_PRIOR_SD = 1.0; // the prior SD on constants
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// The proposal parameters
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+const float PROPOSE_PROPORTION = 0.1; // what percent to propose to on each run?
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // Hypothesis
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -115,7 +123,7 @@ __device__ float compute_constants_prior(hypothesis* h) {
 	
 	float lp = 0.0;
 	for(int k=0;k<MAX_CONSTANTS;k++) {
-		lp += lnormalpdf(h->constants[k], 1.0);
+		lp += lnormalpdf(h->constants[k], CONSTANT_PRIOR_SD);
 	}
 	
 	return lp;
@@ -151,10 +159,10 @@ __device__ float update_posterior(int DLEN, datum* device_data, hypothesis* h, f
 	// Compute all of the posterior stats and save them
 
 	h->likelihood = compute_likelihood(DLEN, device_data, h, stack);
+
 	h->constant_prior = compute_constants_prior(h);
 	
 	h->posterior = h->constant_prior + h->structure_prior + h->likelihood;
-// 	printf("%f %f %f \n", h->constant_prior, h->structure_prior, h->likelihood);
 	
 	return h->posterior;
 }
@@ -171,12 +179,12 @@ __device__ float resample_random_constant(hypothesis* h, RNG_DEF) {
 	
 	// Mix together different SDs, for differnet scales
 	float               SD =  0.1; 
-	if(sdf < 0.10)      SD =  1.0;
-	else if(sdf < 0.15) SD = 10.0;
+	if(sdf < 0.33)      SD =  1.0;
+	else if(sdf < 0.66) SD = 10.0;
 	
 	// and change a bernoulli number of them
 	for(int k=0;k<MAX_CONSTANTS;k++) {
-		if(random_float(RNG_ARGS) < 0.2) {
+		if(random_float(RNG_ARGS) < PROPOSE_PROPORTION) {
 			h->constants[k] += SD * random_normal(RNG_ARGS);
 		}
 	}
@@ -213,7 +221,7 @@ void enumerate_all_programs_rec( hypothesis* cur, int pos, int nopen, int maxdep
 		
 	}
 }
-void enumerate_all_programs(int maxn, int maxdepth, int(*callback)(hypothesis*) ) {
+void enumerate_all_programs(int maxdepth, int(*callback)(hypothesis*) ) {
 	assert(maxdepth <= MAX_PROGRAM_LENGTH);
 	
 	hypothesis* cur = new hypothesis();

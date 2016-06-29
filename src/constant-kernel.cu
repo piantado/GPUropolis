@@ -24,6 +24,7 @@ __global__ void MH_constant_kernel(int N, mcmc_package* all_package, int iterati
 	
 	// update the sample
 	update_posterior(data_length, data, sample, stack);
+	update_posterior(data_length, data, MAP, stack);
 	
 	// Stats on MCMC
 	int this_chain_acceptance_count = 0;
@@ -55,11 +56,13 @@ __global__ void MH_constant_kernel(int N, mcmc_package* all_package, int iterati
 			
 			// update the chain acceptance count
 			this_chain_acceptance_count += 1;
-			
-			if(sample->posterior > MAP->posterior || is_invalid(MAP->posterior)){
-				COPY_HYPOTHESIS(MAP, sample);
-			}
 		} // end if swap
+		
+		// and update the MAP if we should 
+		if(sample->posterior > MAP->posterior || is_invalid(MAP->posterior))
+			COPY_HYPOTHESIS(MAP, sample);
+			
+		
 	}
 	
 	// if we get to the end and we are pointing at mypackage->proposal, we need to 

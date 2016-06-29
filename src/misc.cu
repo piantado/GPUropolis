@@ -26,6 +26,17 @@
 #define is_invalid(x) (!is_valid(x))
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// CUDA
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+void cudaSynchronizeAndErrorCheck() {
+	cudaDeviceSynchronize(); //
+	cudaError_t error = cudaGetLastError();
+	if(error != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(error)); }
+	
+}	
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // Random number generation 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -133,121 +144,26 @@ __device__ __host__ float luniformpdf( float x ){
 
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-// My versions of primitives
-// Here, we use the full precision (powf instead of __powf) BUT we use the fast_math flag in the Makefile to 
-// compile these to faster versions
+// Numerics
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-
-__device__ float my_pow(float x, float y) {
-	// 	
-// 	// HMM CUDA: if I write this as this, it doesn't work and I get assertion failures
-// // 	if(x<0.0f) return CUDART_NAN_F;
-// 	assert(x>=0.0f); // THIS FAILS WTF
-// 	return powf(x,y);	
-// 	// is this something to do with thread divergence?
-// 	
-// 	// Like this, it seems to go okay. Why?? CUDA, please explain!
-	if(x>=0.0f && is_valid(x) && is_valid(y) ){
-		assert(x>=0.0f);
-		return powf(x,y);
-	}
-	else {
-		return CUDART_NAN_F;
-	}
+double logaddexp(double x, double y) {
+	double m = max(x,y);
+	return log(exp(x-m) + exp(y-m)) + m;
 }
 
-__device__ float my_exp(float x) {
-	if(is_valid(x)){
-		return expf(x);
-	}
-	else {
-		return CUDART_NAN_F;
-	}
-}
+double logsumexp( double* ar, int len) {
 
-__device__ float my_log(float x) {
+	double m = -1./0.;
+	for(int i=0;i<len;i++) {
+		if(ar[i] > m) m = ar[i];
+	}
 	
-	if(is_valid(x) && x>0.0f) {
-		return logf(x);
+	double thesum = 0.0;
+	for(int i=0;i<len;i++) {
+		thesum += exp(ar[i]-m);
 	}
-	else {
-		return CUDART_NAN_F;
-	}
+	
+	return log(thesum)+m;
 }
 
-__device__ float my_gamma(float x) {
-	if(x > 0.0 && is_valid(x)) {
-		return tgammaf(x);
-	}
-	else {
-		return CUDART_NAN_F;
-	}
-}
-
-__device__ float my_sqrt(float x) {
-	if(x < 0.0f || is_invalid(x)) return CUDART_NAN_F;
-	else return sqrtf(x);
-}
-
-__device__ float my_abs(float x) {
-	if(is_invalid(x)) return CUDART_NAN_F;
-	else return fabsf(x);
-}
-
-__device__ float my_round(float x) {
-	if(is_invalid(x)) return CUDART_NAN_F;
-	else return roundf(x);
-}
-
-__device__ float my_neg(float x) {
-	if(is_invalid(x)) return CUDART_NAN_F;
-	else return -x;
-}
-
-__device__ float my_sgn(float x) {
-	if(is_invalid(x)) return CUDART_NAN_F;
-	else return (x>0.0f)-(x<0.0f);
-}
-
-__device__ float my_add(float x, float y) {
-	if(is_invalid(x) || is_invalid(y) ) return CUDART_NAN_F;
-	else return x+y;
-}
-
-__device__ float my_mul(float x, float y) {
-	if(is_invalid(x) || is_invalid(y) ) return CUDART_NAN_F;
-	else return x*y;
-}
-
-__device__ float my_div(float x, float y) {
-	if(is_invalid(x) || is_invalid(y) || y==0.0f ) return CUDART_NAN_F;
-	else return x/y;
-}
-
-__device__ float my_sin(float x) {
-	if(is_invalid(x)) return CUDART_NAN_F;
-	else return sinf(x);
-}
-__device__ float my_asin(float x) {
-	if(is_invalid(x)) return CUDART_NAN_F;
-	else return asinf(x);
-}
-
-__device__ float my_cos(float x) {
-	if(is_invalid(x)) return CUDART_NAN_F;
-	else return cosf(x);
-}
-__device__ float my_acos(float x) {
-	if(is_invalid(x)) return CUDART_NAN_F;
-	else return acosf(x);
-}
-
-__device__ float my_tan(float x) {
-	if(is_invalid(x)) return CUDART_NAN_F;
-	else return tanf(x);
-}
-__device__ float my_atan(float x) {
-	if(is_invalid(x)) return CUDART_NAN_F;
-	else return atanf(x);
-}

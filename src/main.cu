@@ -17,13 +17,13 @@
 #include <vector>
 #include "cuPrintf.cu" //!
 
-#include "src/misc.cu"
-#include "src/__PRIMITIVES.cu"
 #include "src/data.cu"
+#include "src/misc.cu"
+#include "src/primitives.cu"
+#include "src/__PRIMITIVES.cu"
 #include "src/hypothesis.cu"
 #include "src/mcmc-package.cu"
 #include "src/virtual-machine.cu"
-#include "src/io.cu"
 
 #include "src/constant-kernel.cu"
 
@@ -41,7 +41,7 @@ string OUT_PATH     = "run";
 
 int SEED = -1; // Random number seed (for replicability) if -1, we use time()
 
-int ENUMERATION_DEPTH = 7; //8
+int ENUMERATION_DEPTH = 8; //8
 
 int MCMC_ITERATIONS = 1000; 
 int OUTER_BLOCKS = 1;
@@ -50,10 +50,13 @@ int BURN_BLOCKS = 0; // how many blocks (of MCMC_ITERATIONS each) do we burn-in?
 int FIRST_HALF_DATA = 0; // use only the first half of the data
 int EVEN_HALF_DATA  = 0; // use only the even half of the data
 
+int HYPOTHESIS_I_COUNTER = 0; // what number hypothesis are we on (overall)?
+int SAMPLE_BATCH_COUNTER = 0; // how many batches (of N samples) have we run?
+
 int seed;
 
 // the output paths (defined below)
-string SAMPLE_PATH, MAP_PATH, TOP_PATH, ALL_TOP_PATH, LOG_PATH, PERFORMANCE_PATH;
+string SAMPLE_PATH, MAP_PATH, TOP_PATH, ALL_TOP_PATH, LOG_PATH, PERFORMANCE_PATH, RESULTS_MATRIX_PATH;
 
 // These are shared arrays among all main functions:
 mcmc_package* host_mcmc_package;
@@ -64,9 +67,13 @@ int DATA_LENGTH; // the amount of data
 float PERFECT_LL;
 int MCMC_PACKAGE_SIZE;
 
+#include "src/results-matrix.cu" // uses a bunch of the above defines
+#include "src/io.cu"
+
 static struct option long_options[] =
 	{	
 		{"in",           required_argument,    NULL, 'd'},
+		{"enumeration",           required_argument,    NULL, 'E'},
 		{"iterations",   required_argument,    NULL, 'i'},
 		{"N",            required_argument,    NULL, 'N'},
 		{"out",          required_argument,    NULL, 'O'},
@@ -88,7 +95,6 @@ static struct option long_options[] =
 // --------------------------------------------------------------------------------------------------------------
 
 void host_run_MCMC(int N, mcmc_package* packages, datum* host_data) {
-	
 	clock_t mytimer;
 	
 	// ----------------------
@@ -100,7 +106,8 @@ void host_run_MCMC(int N, mcmc_package* packages, datum* host_data) {
 		// Set up the rng (also we can anneal here if we want)
 		for(int i=0;i<N;i++) {
 			host_mcmc_package[i].rng_seed = seed + (1+outer)*N + i; // set this seed
-			host_mcmc_package[i].chain_index = i;
+			host_mcmc_package[i].chain_index = HYPOTHESIS_I_COUNTER;
+			HYPOTHESIS_I_COUNTER++;
 		}
 		
 		// copy these over, containing our initial hypotheses
@@ -114,16 +121,13 @@ void host_run_MCMC(int N, mcmc_package* packages, datum* host_data) {
 		mytimer = clock();
 		
 		cudaPrintfInit(); // set up cuPrintf
-		cudaDeviceSynchronize(); 
 		
 		MH_constant_kernel<<<N_BLOCKS,BLOCK_SIZE>>>(N, device_mcmc_package, MCMC_ITERATIONS);
-		cudaDeviceSynchronize(); // wait for preceedings requests to finish
+		cudaSynchronizeAndErrorCheck();
 		
 		cudaPrintfDisplay(stdout, true); // clean up cuPrintf
 		cudaPrintfEnd(); //
-		
-		cudaError_t error = cudaGetLastError();
-		if(error != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(error)); }
+		cudaSynchronizeAndErrorCheck();
 		
 		secDEVICE = double(clock() - mytimer) / CLOCKS_PER_SEC;
 		
@@ -132,8 +136,10 @@ void host_run_MCMC(int N, mcmc_package* packages, datum* host_data) {
 		
 		// Retrieve result from device and store it in host array
 		mytimer = clock();
+		
 		cudaMemcpy(host_mcmc_package, device_mcmc_package, MCMC_PACKAGE_SIZE, cudaMemcpyDeviceToHost);
-		cudaDeviceSynchronize();
+		cudaSynchronizeAndErrorCheck();
+		
 		secTRANSFER += double(clock() - mytimer) / CLOCKS_PER_SEC;
 		
 		// -----------------------------------------------------------------------------------------------------
@@ -141,26 +147,18 @@ void host_run_MCMC(int N, mcmc_package* packages, datum* host_data) {
 		
 		// For locally manipulating hypotheses -- just for displaying
 		mytimer = clock(); // for timing the rest of host operations
-		hypothesis* host_hypotheses = new hypothesis[N]; 
-		hypothesis* host_out_MAPs   = new hypothesis[N];
-	
-		for(int i=0;i<N;i++) {
-			COPY_HYPOTHESIS( &(host_hypotheses[i]), &(host_mcmc_package[i].sample) );
-			COPY_HYPOTHESIS( &(host_out_MAPs[i]),   &(host_mcmc_package[i].MAP) );
-		}	
-		
-		// sort them as required below
-		qsort( (void*)host_hypotheses, N, sizeof(hypothesis), hypothesis_posterior_compare);
-		qsort( (void*)host_out_MAPs,   N, sizeof(hypothesis), hypothesis_posterior_compare);
 		
 		// Save results. But not for burn blocks
 		if(outer >= BURN_BLOCKS) {
-			dump_to_file(SAMPLE_PATH.c_str(), host_hypotheses, 0, outer, N, 1); // dump samples
-			dump_to_file(MAP_PATH.c_str(),    host_out_MAPs,   0, outer, N, 1); // dump maps
+			
+			save_mcmc_package_to_file(SAMPLE_PATH.c_str(), 1, outer);
+		
+			// -----------------------------------------------------------------------------------------------------
+			// And update the result matrix, with this sample
+			// NOTE: THIS USSES THE CURRENTLY FOUND MAP (WHICH IS OKAY IF WE BURN ENOUGH)
+			
+			GPU_add_rM();
 		}
-
-		delete[] host_hypotheses;
-		delete[] host_out_MAPs;
 		
 		// Now how to handle the end of a "block" -- what update do we do?
 		secHOST = double(clock() - mytimer) / CLOCKS_PER_SEC;
@@ -177,7 +175,7 @@ void host_run_MCMC(int N, mcmc_package* packages, datum* host_data) {
 		
 		FILE* fp = fopen(PERFORMANCE_PATH.c_str(), "a");
 		fprintf(fp, "%i\t%i\t%.2f\t%.2f\t%.6f\t%.6f\t%.2f\t%.2f\t%.2f\t%.5f\n",
-			0, 
+			SAMPLE_BATCH_COUNTER, 
 			outer, 
 			PERFECT_LL,
 			secDEVICE, 
@@ -190,8 +188,26 @@ void host_run_MCMC(int N, mcmc_package* packages, datum* host_data) {
 		);
 		
 		fclose(fp);
+		
+	
 	
 	} // end outer loop 
+	
+	// ---------------------------------------------------
+	// And process the MAPs (after everything!)
+	
+	save_mcmc_package_to_file(MAP_PATH.c_str(), 0, SAMPLE_BATCH_COUNTER);
+	
+	// ---------------------------------------------------
+	// And write the result matrix out
+		
+	write_results_matrix();
+	
+	// ---------------------------------------------------
+	// and keep track of how many batches we've run
+	
+	SAMPLE_BATCH_COUNTER++;
+	
 	
 }
 
@@ -214,7 +230,7 @@ bool check_in_enumeration(hypothesis* h){
 		if(i < MAX_PROGRAM_LENGTH-1) oip1 = h->program[i+1];
 		
 		// TODO: CLEAN UP THESE CONSTRAINTS!
-		if( oi==NEG_ && oip1==NEG_) return 0; // no double negatives		
+		if( oi==NEG_ && (oip1==NEG_ || oip1 == CONSTANT_) ) return 0; // no double negatives		
 		if( (oi==ONE_) && (oip1==MUL_ || oip1==DIV_ || oip1==LOG_ || oip1==POW_) ) return 0; // none of these operations make sense
 		if( (oi==ZERO_) && (oip1==MUL_ || oip1==DIV_ || oip1==ADD_ || oip1==SUB_ || oip1==LOG_ || oip1==EXP_ || oip1==POW_) ) return 0; // none of these operations make sense
 		
@@ -279,6 +295,7 @@ int main(int argc, char** argv)
 	while( (opt = getopt_long( argc, argv, "bp", long_options, &option_index )) != -1 )
 		switch( opt ) {
 			case 'd': in_file_path = optarg; break;
+			case 'E': ENUMERATION_DEPTH = atoi(optarg); break;
 			case 'i': MCMC_ITERATIONS = atoi(optarg); break;
 			case 'N': N = atoi(optarg); break;
 			case 'o': OUTER_BLOCKS = atoi(optarg); break;
@@ -306,6 +323,7 @@ int main(int argc, char** argv)
 	ALL_TOP_PATH = OUT_PATH+"/all-tops.txt"; // the tops of each repetition are concatenated to this
 	LOG_PATH = OUT_PATH+"/log.txt";
 	PERFORMANCE_PATH = OUT_PATH+"/performance.txt";
+	RESULTS_MATRIX_PATH = OUT_PATH+"/results-matrix.txt";
 	
 	// -------------------------------------------------------------------------
 	// Make the RNG replicable
@@ -359,7 +377,7 @@ int main(int argc, char** argv)
 	for(int i=0;i<DATA_LENGTH;i++) 
 		fprintf(fp, "\t%f\t%f\t%f\n", host_data[i].input, host_data[i].output, host_data[i].sd);
 	fclose(fp);
-	
+
 	// -----------------------------------------------------------------------
 	// Set up the packages and data locally, and copy
 	// -----------------------------------------------------------------------
@@ -384,13 +402,20 @@ int main(int argc, char** argv)
 	
 	for(int i=0;i<N;i++){
 		initialize( &(host_mcmc_package[i].sample) ); // initialize these so that if we don't fill up, 
-		initialize( &(host_mcmc_package[i].MAP) );
 		initialize( &(host_mcmc_package[i].proposal) );
+		initialize( &(host_mcmc_package[i].MAP) );
+		host_mcmc_package[i].MAP.posterior = -1./0.; // must initialize this so we over-write
 		
 		host_mcmc_package[i].data_length = DATA_LENGTH;
 		host_mcmc_package[i].data = device_data;
 	}
 	
+	
+	// -----------------------------------------------------------------------
+	// Initialize the result matrix
+	// -----------------------------------------------------------------------
+	
+	initialize_rM();
 	
 	// -----------------------------------------------------------------------
 	// -----------------------------------------------------------------------
@@ -403,7 +428,7 @@ int main(int argc, char** argv)
 		
 	// To run successively with enumeration (for larger enumeration)
 	// This uses host_mcmc_package to store the mcmc results, etc. 
-	enumerate_all_programs( N, ENUMERATION_DEPTH, add_and_run);
+	enumerate_all_programs(ENUMERATION_DEPTH, add_and_run);
 	
 	// then we still have to run the partially-filled one!
 	host_run_MCMC(N, host_mcmc_package, host_data); 

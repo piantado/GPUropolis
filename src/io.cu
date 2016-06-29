@@ -122,20 +122,26 @@ void print_program_as_expression(FILE* fp, hypothesis* h) {
 
 
 
-void dump_to_file(const char* path, hypothesis* ar, int repn, int outern, int N, int append) {
+void save_mcmc_package_to_file(const char* path, int sample_or_MAP, int firstnumber) {
 	
+	hypothesis* myhyp = new hypothesis[N]; 
 	
-	FILE* fp;
-	if(append) fp = fopen(path, "a");
-	else       fp = fopen(path, "w");
+	// copy the sample or the MAP depending on which we got
+	for(int i=0;i<N;i++){
+		if(sample_or_MAP == 1) { COPY_HYPOTHESIS( &(myhyp[i]), &(host_mcmc_package[i].sample) );}
+		else                   { COPY_HYPOTHESIS( &(myhyp[i]), &(host_mcmc_package[i].MAP) );}
+	}
+	// sort them as required below
+	qsort( (void*)myhyp, N, sizeof(hypothesis), hypothesis_posterior_compare);
+	
+	FILE* fp = fopen(path, "a");
 	if(fp==NULL) { cerr << "*** ERROR: Cannot open file:\t" << path <<"\n"; exit(1);}
 	
 	for(int n=0;n<N;n++) {
-		hypothesis* h = &ar[n];
-		fprintf(fp, "%i\t%i\t%d\t%.3f\t%.3f\t%.3f\t%.3f\t", 
-			repn, 
-			outern, 
-			n, 
+		hypothesis* h = &myhyp[n];
+		fprintf(fp, "%d\t%d\t%.3f\t%.3f\t%.3f\t%.3f\t", 
+			firstnumber, 
+			host_mcmc_package[n].chain_index, 
 			h->posterior,  
 			h->constant_prior,
 			h->structure_prior,
@@ -158,5 +164,7 @@ void dump_to_file(const char* path, hypothesis* ar, int repn, int outern, int N,
 		fprintf(fp, "\"\n");
 	}
 	
-	fclose(fp);	
+	fclose(fp);
+	delete[] myhyp;
+		
 }

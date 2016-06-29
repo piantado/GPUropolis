@@ -1,9 +1,10 @@
  
-ITERATIONS=1000 #50000 # K20: 10000 #200000   ## About 1min for each 1k, for Zipf
-OUTER_BLOCKS=100 #20  
-N=10000 #50000 # 131072 #131072 # 131072 # 128*1024
+ITERATIONS=100 #200 #50000 # K20: 10000 #200000   ## About 1min for each 1k, for Zipf
+OUTER_BLOCKS=100 #100 #100 outer / 100 burn works really well!  
+N=50000
 OUTROOT=run/
-BURN=100
+BURN=100 #100
+ENUMERATION=9
 
 # The executable
 EXEC=./gpumcmc
@@ -14,15 +15,16 @@ shopt -s globstar
 OUTROOT=./run
 
 WHICHHALF=all
-# for DATA in $(ls -d data-sources/Regression/1); do
 
+# for DATA in $(ls -d data-sources/Regression/1); do
 # DATA=data-sources/Regression/-10_20
 # for DATA in $(ls -d data-sources/Regression/*); do
-# DATA=data-sources/Science/BalmerSeries
-DATA=data-sources/Stats/Logistic
+# DATA=data-sources/Science/COBE
+# DATA=data-sources/Stats/Logistic
+# DATA=data-sources/NIST/MGH09
 # for WHICHHALF in 'first-half' 'even-half' 'all' ; do
-# for DATA in $(ls -d data-sources/Science/*) ; do
-# for DATA in $(ls -d data-sources/Science/*)  $(ls -d data-sources/Stats/*) $(ls -d data-sources/NIST/*) ; do
+for DATA in data-sources/Science/COBE data-sources/Science/Hubble data-sources/Science/Galileo ; do
+# for DATA in $(ls -d data-sources/NIST/*) ; do
 # for DATA in $(ls -d data-sources/Science/*)  $(ls -d data-sources/Stats/*) $(ls -d data-sources/NIST/*) ; do
 
 	echo Running $DATA 
@@ -37,13 +39,9 @@ DATA=data-sources/Stats/Logistic
 	
 	# run the CUDA MCMC; must use gnu time in order to output
 	# But here we also run time so it prints on command line too
-	time /usr/bin/time --output=$OUT/time.txt $EXEC --burn=$BURN --iterations=$ITERATIONS --in=$DATA/data.txt --outer=$OUTER_BLOCKS --burn=$BURN_BLOCKS --N=$N --out=$OUT --$WHICHHALF
+	time /usr/bin/time --output=$OUT/time.txt $EXEC --burn=$BURN --enumeration=$ENUMERATION --iterations=$ITERATIONS --in=$DATA/data.txt --outer=$OUTER_BLOCKS --burn=$BURN_BLOCKS --N=$N --out=$OUT --$WHICHHALF
 	
-	sort -g -k 5 --parallel=4 $OUT/samples.txt | tail -n 10000 > $OUT/tops.txt &
+	sort -g -k 3 --parallel=4 $OUT/samples.txt | tail -n 10000 > $OUT/tops.txt &
 	
-	# And a python post-processing script to do plotting.
-	# Run in the background so we can move to the next plot
-# 	nice -n 19 python postprocess.py --directory=$OUT &
-
-# done
+done
 # done

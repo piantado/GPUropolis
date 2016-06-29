@@ -22,31 +22,45 @@ typedef struct datum {
 	data_t sd; // stdev of the output|input. 
 } datum;
 
+// the range of data, including the SDs, NOT counting any exclusions for even/odd, etc.
+data_t MIN_X, MAX_X, MIN_Y, MAX_Y;
+
 
 // Load data froma  file, putting it into our structs.
 // This allows us to trim our data if we want
 vector<datum>* load_data_file(const char* datapath, int FIRST_HALF_DATA, int EVEN_HALF_DATA) {
 
+	MIN_X = INFINITY;
+	MIN_Y = INFINITY;
+	MAX_X = -INFINITY;
+	MAX_Y = -INFINITY;
+	
 	FILE* fp = fopen(datapath, "r");
 	if(fp==NULL) { cerr << "*** ERROR: Cannot open file:\t" << datapath <<"\n"; exit(1);}
 	
 	vector<datum>* d = new vector<datum>();
-	char* line = NULL; size_t len=0; float x,y,sd; 
+	char* line = NULL; size_t len=0; 
 	while( getline(&line, &len, fp) != -1) {
-		if( line[0] == '#' ) continue;  // skip comments
-		else if (sscanf(line, "%f\t%f\t%f\n", &x, &y, &sd) == 3) { // floats
-			d->push_back( (datum){.input=(data_t)x, .output=(data_t)y, .sd=(data_t)sd} );
-		}
-		else if (sscanf(line, "%e\t%e\t%e\n", &x, &y, &sd) == 3) { // scientific notation
-			d->push_back( (datum){.input=(data_t)x, .output=(data_t)y, .sd=(data_t)sd} );
-		}
-		else if ( strspn(line, " \r\n\t") == strlen(line) ) { // skip whitespace
-			continue;
-		}
+		
+		if( line[0] == '#' || strspn(line, " \r\n\t") == strlen(line)) continue;  // skip comments and whitespace
+		
+		float x,y,sd; // these are set by sscanf
+		if (sscanf(line, "%f\t%f\t%f\n", &x, &y, &sd) == 3) { } // floats
+		else if (sscanf(line, "%e\t%e\t%e\n", &x, &y, &sd) == 3) { } // scientific notation
 		else {
 			cerr << "*** ERROR IN PARSING INPUT\t" << line << endl;
 			exit(1);
 		}
+		
+		// add these x,y,sd
+		d->push_back( (datum){.input=(data_t)x, .output=(data_t)y, .sd=(data_t)sd} );
+		
+		// our min/max includes the SDs
+		if(x > MAX_X) MAX_X = x;
+		if(x < MIN_X) MIN_X = x;
+		
+		if(y+sd > MAX_Y) MAX_Y = y+sd;
+		if(y-sd < MIN_Y) MIN_Y = y-sd;
 	}
 	fclose(fp);
 	
