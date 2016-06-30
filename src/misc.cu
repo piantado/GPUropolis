@@ -46,11 +46,12 @@
 
 // A linear congruential 
  __device__ __host__ int random_int(int n, RNG_DEF) {
+     // number in [0,(n-1)]
 
 	//http://rosettacode.org/wiki/Linear_congruential_generator#C (WOW, error on that page -- should be % not &)
 	rx = (rx * 1103515245 + 12345) % MY_RAND_MAX;
 	
-	float p = float(rx)/float(MY_RAND_MAX+1);
+	float p = float(rx)/float(MY_RAND_MAX);
 	
 	return int(p*n);
 }

@@ -1,7 +1,7 @@
  
 ITERATIONS=10000 
 OUTER_BLOCKS=100 
-N=10000 
+N=1000
 OUTROOT=run/
 BURN=0
 
@@ -38,7 +38,7 @@ for DATA in $(ls -d data-sources/Science/*) ; do
 	# But here we also run time so it prints on command line too
 	time /usr/bin/time --output=$OUT/time.txt $EXEC --burn=$BURN --iterations=$ITERATIONS --in=$DATA/data.txt --outer=$OUTER_BLOCKS --burn=$BURN_BLOCKS --N=$N --out=$OUT --$WHICHHALF
 	
-	sort -g -k 5 --parallel=4 $OUT/samples.txt | tail -n 10000 > $OUT/tops.txt &
+	sort -g -k 4 --parallel=8 $OUT/samples.txt | tail -n 10000 > $OUT/tops.txt &
 	
 	# And a python post-processing script to do plotting.
 	# Run in the background so we can move to the next plot

@@ -5,7 +5,7 @@
  */
 #include "structures.cu"
 
-const int NUM_OPS=15;
+const int NUM_OPS=16;
 enum OPS { NOOP_=0,CONSTANT_=1,X_=2,ZERO_=3,ONE_=4,EXP_=5,LOG_=6,NEG_=7,MUL_=8,POW_=9,ADD_=10,DIV_=11,SUB_=12, RET_=13, DUP_=14, SWAP_=15};
 
 __device__ data_t f_output(data_t X, hypothesis* h, data_t* stack) {

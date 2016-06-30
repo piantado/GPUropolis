@@ -25,7 +25,7 @@ enum CONSTANT_TYPES { GAUSSIAN, EXPONENTIAL, UNIFORM,  LOGNORMAL, CAUCHY, __N_CO
 // Choose an op from the prior distribution
 // NOTE: assumes prior on expansions is normalized
 __device__ __host__ op_t random_op(RNG_DEF) {
-    return NUM_OPS * random_float(RNG_ARGS); // TODO: CHECK 
+    return random_int(NUM_OPS, RNG_ARGS); // TODO: CHECK 
 }
 
 // Randomize the constants
@@ -158,9 +158,8 @@ int hypothesis_posterior_compare(const void* a, const void* b) {
 
 
 
-const int MAX_OP_LENGTH = 5; // how much does each string add at most?
+const int MAX_OP_LENGTH = 10; // how much does each string add at most?
 char buff[100]; // a buffer to store floating points
-
 void print_program_as_expression(FILE* fp, hypothesis* h) {
     // Display a program in a file fp
     
@@ -197,13 +196,147 @@ void print_program_as_expression(FILE* fp, hypothesis* h) {
                 strcat(buf, buff); */
                 break;
             default:
-                cerr << "ERROR unknown primitive" << int(h->program[p]) << endl;
+                cerr << "ERROR unknown primitive " << int(h->program[p]) << "\t" << p << endl;
         }
     }
 DONE:
 
     fprintf(fp, "%s", buf);
 }
+
+
+//------------
+// For easier displays
+const int BUF_LEN = MAX_OP_LENGTH*MAX_PROGRAM_LENGTH*10; 
+char SS[STACK_SIZE][BUF_LEN]; 
+void print_program_as_concise_expression(FILE* fp, hypothesis* h) {
+    /*
+     * Print things nicely on displays.
+     * Currently these are set to play nice with sympy for processing output
+     */
+    
+    char buf[BUF_LEN];
+    
+    int top = STACK_START; // top of the stack
+    int constant_i = 0; //
+    
+    // re-initialize our buffer
+    for(int r=0;r<STACK_SIZE;r++) 
+        strcpy(SS[r], "0"); // since everything initializes to 0
+    
+    for(int p=0;p<MAX_PROGRAM_LENGTH;p++) {
+        op_t op = h->program[p];
+        
+        switch(op) {
+            case NOOP_:
+                break;
+            case ZERO_: 
+                top += 1;
+                strcpy(SS[top], "0"); // TODO: Shoudl ZERO_ And ONE_ be floats? Sympy doesn't fully simplify if floats
+                break;
+            case ONE_: 
+                top += 1;
+                strcpy(SS[top], "1");
+                break;
+            case X_:
+                top += 1;
+                strcpy(SS[top], "x");
+                break;
+            case ADD_:
+                strcpy(buf, "(");
+                strcat(buf, SS[top]);
+                strcat(buf, "+");
+                strcat(buf, SS[top-1]);
+                strcat(buf, ")");
+                top -= 1;
+                strcpy(SS[top], buf);
+                break;
+                
+            case SUB_:
+                strcpy(buf, "(");
+                strcat(buf, SS[top]);
+                strcat(buf, "-");
+                strcat(buf, SS[top-1]);
+                strcat(buf, ")");
+                top -= 1;
+                strcpy(SS[top], buf);
+                break;
+                
+            case MUL_:
+                strcpy(buf, "(");
+                strcat(buf, SS[top]);
+                strcat(buf, "*");
+                strcat(buf, SS[top-1]);
+                strcat(buf, ")");
+                top -= 1;
+                strcpy(SS[top], buf);
+                break;
+                
+            case DIV_:
+                strcpy(buf, "(");
+                strcat(buf, SS[top]);
+                strcat(buf, "/");
+                strcat(buf, SS[top-1]);
+                strcat(buf, ")");
+                top -= 1;
+                strcpy(SS[top], buf);
+                break;
+            case POW_:
+                strcpy(buf, "(");
+                strcat(buf, SS[top]);
+                strcat(buf, "**");
+                strcat(buf, SS[top-1]);
+                strcat(buf, ")");
+                top -= 1;
+                strcpy(SS[top], buf);
+                break;  
+            case NEG_:
+                strcpy(buf, "(-");
+                strcat(buf, SS[top]);
+                strcat(buf, ")");
+                strcpy(SS[top], buf);
+                break;
+            case EXP_:
+                strcpy(buf, "exp(");
+                strcat(buf, SS[top]);
+                strcat(buf, ")");
+                strcpy(SS[top], buf);
+                break;
+            case LOG_:
+                strcpy(buf, "log(");
+                strcat(buf, SS[top]);
+                strcat(buf, ")");
+                strcpy(SS[top], buf);
+                break;
+            case CONSTANT_:
+                top += 1;           
+                sprintf(SS[top],"C%i", constant_i % MAX_CONSTANTS);
+                constant_i++;
+                break;
+            case DUP_:
+                top += 1;
+                strcpy(SS[top], SS[top-1]);                
+                break;
+            case SWAP_:
+                strcpy(buf, SS[top-1]);
+                strcpy(SS[top-1], SS[top]);
+                strcpy(SS[top], buf);                                
+                break;
+            case RET_:
+                goto DONE;
+            default: // Defaultly just use the name
+                cerr << "Error in displaying ... " << int(op) << endl;
+                break;
+                
+        }
+    }
+    DONE:
+    
+    fprintf(fp, "%s", SS[top]);
+}
+
+
+
 
 void dump_to_file(FILE* fp, hypothesis* h, int i, int outern) {
     
@@ -217,19 +350,21 @@ void dump_to_file(FILE* fp, hypothesis* h, int i, int outern) {
         );
     
         //print out the program
-        fprintf(fp,"\"");
-        for(int i=0;i<MAX_PROGRAM_LENGTH;i++) fprintf(fp, "%d ", h->program[i]);
-        fprintf(fp,"\"\t");     
+//         fprintf(fp,"\"");
+//         for(int i=0;i<MAX_PROGRAM_LENGTH;i++) fprintf(fp, "%d-", h->program[i]);
+//         fprintf(fp,"\"\t");     
+//         
+        fprintf(fp, "%i\t", compute_program_length(h));
         
         // print out constant types
-        fprintf(fp,"\"");
-        for(int i=0;i<MAX_CONSTANTS;i++) fprintf(fp, "%i ", h->constant_types[i]);
-        fprintf(fp,"\"\t");
-
+        for(int i=0;i<MAX_CONSTANTS;i++) fprintf(fp, "%i\t", h->constant_types[i]);
+        
         // print out constants
-        fprintf(fp,"");
         for(int i=0;i<MAX_CONSTANTS;i++) fprintf(fp, "%.5f\t", h->constants[i]);
-        fprintf(fp,"\t");           
+        
+        fprintf(fp, "\"");
+        print_program_as_concise_expression(fp, h);
+        fprintf(fp, "\"\t");
         
         fprintf(fp, "\"");
         print_program_as_expression(fp, h );

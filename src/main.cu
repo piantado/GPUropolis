@@ -117,33 +117,31 @@ void host_run_MCMC(int N, mcmc_specification* host_spec, mcmc_results* host_mcmc
 			host_spec[i].rng_seed = seed + (1+outer)*N*(i+1); // set this seed; i+1 and outer+1 here prevent us getting a zero
 		}
 		
-		mytimer = clock();
+		// copy to host
+		mytimer = clock(); 
 		cudaMemcpy(dev_spec, host_spec, NSPECSIZE, cudaMemcpyHostToDevice);
-		
-		// copy these over, containing our initial hypotheses
 		cudaMemcpy(device_mcmc_results, host_mcmc_results, MCMC_RESULTS_SIZE, cudaMemcpyHostToDevice);
-		secTRANSFER += double(clock() - mytimer) / CLOCKS_PER_SEC;
+		secTRANSFER = double(clock() - mytimer) / CLOCKS_PER_SEC;
 		
 		//////////////// Now run: //////////////// 
 		////////////////////////////////////////// 
 		
-		mytimer = clock();
 		
 		cudaPrintfInit(); // set up cuPrintf
         cudaDeviceSynchronize(); 
 		
- 		MH_simple_kernel<<<N_BLOCKS,BLOCK_SIZE>>>(N, dev_spec, device_mcmc_results);
+        mytimer = clock();
+        MH_simple_kernel<<<N_BLOCKS,BLOCK_SIZE>>>(N, dev_spec, device_mcmc_results);
 		cudaDeviceSynchronize(); // wait for preceedings requests to finish
-		
+		secDEVICE = double(clock() - mytimer) / CLOCKS_PER_SEC;
+        
 		cudaPrintfDisplay(stdout, true); // clean up cuPrintf
 		cudaPrintfEnd(); //
 		
 		cudaError_t error = cudaGetLastError();
 		if(error != cudaSuccess) {
 			printf("CUDA error: %s\n", cudaGetErrorString(error));
-		}
-		
-		secDEVICE = double(clock() - mytimer) / CLOCKS_PER_SEC;
+		}		
 		
 		////////////////////////////////////////// 
 		////////////////////////////////////////// 
@@ -178,8 +176,8 @@ void host_run_MCMC(int N, mcmc_specification* host_spec, mcmc_results* host_mcmc
             FILE* fp_map    = fopen(MAP_PATH.c_str(), "a");
             
             for(int i=0;i<N;i++) {
-                dump_to_file(fp_sample, &host_hypotheses[i], i,  N);
-                dump_to_file(fp_map,    &host_out_MAPs[i],   i,  N);
+                dump_to_file(fp_sample, &host_hypotheses[i], i,  outer);
+                dump_to_file(fp_map,    &host_out_MAPs[i],   i,  outer);
             }
             
            fclose(fp_sample); 
@@ -203,7 +201,7 @@ void host_run_MCMC(int N, mcmc_specification* host_spec, mcmc_results* host_mcmc
 		AR_mean /= float(N);
 		
 		FILE* fp = fopen(PERFORMANCE_PATH.c_str(), "a");
-		fprintf(fp, "%i\t%.5f\t%.2f\t%.6f\t%.6f\t%.2f\t%.2f\t%.2f\t%.5f\n",
+		fprintf(fp, "%i\t%.2f\t%.6f\t%.6f\t%.6f\t%.2f\t%.2f\t%.2f\t%.5f\n",
 			outer, 
 			PERFECT_LL,
 			secDEVICE, 
@@ -319,7 +317,7 @@ int main(int argc, char** argv)
 	
 	fp = fopen(PERFORMANCE_PATH.c_str(), "w");
 	if(fp==NULL) { cerr << "*** ERROR: Cannot open file:\t" << PERFORMANCE_PATH <<"\n"; exit(1);}
-	fprintf(fp, "block\tperfect.ll\tcpu.time\ttransfer.time\tgpu.time\tsamples.per.second\tf.per.second\tprimitives.per.second\ttransfer.mb.per.second\tacceptance.ratio\n");
+	fprintf(fp,   "block\tperfect.ll\tgpu.time\ttransfer.time\tcpu.time\tsamples.per.second\tf.per.second\ttransfer.mb.per.second\tacceptance.ratio\n");
 	fclose(fp);
 	
 	// -----------------------------------------------------------------------

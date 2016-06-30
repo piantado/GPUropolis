@@ -31,7 +31,7 @@ __device__ float propose_insert(hypothesis* to, hypothesis* from, RNG_DEF){
     COPY_HYPOTHESIS( to, from );
     
     // insert between start and stop, shifting to the right
-    int start = random_int(MAX_PROGRAM_LENGTH-1, RNG_ARGS); // TODO: Check off by 1?
+    int start = random_int(MAX_PROGRAM_LENGTH, RNG_ARGS); // TODO: Check off by 1?
     int stop  = start+random_int(MAX_PROGRAM_LENGTH-start, RNG_ARGS); 
     int l = stop-start;
     
@@ -51,7 +51,7 @@ __device__ float propose_delete(hypothesis* to, hypothesis* from, RNG_DEF){
     COPY_HYPOTHESIS( to, from );
     
     // insert between start and stop, shifting to the right
-    int start = random_int(MAX_PROGRAM_LENGTH-1, RNG_ARGS); // TODO: Check off by 1?
+    int start = random_int(MAX_PROGRAM_LENGTH, RNG_ARGS); // TODO: Check off by 1?
     int stop  = start+random_int(MAX_PROGRAM_LENGTH-start, RNG_ARGS); 
     int l = stop-start;
     
@@ -149,10 +149,10 @@ __global__ void MH_simple_kernel(int N, mcmc_specification* all_spec, mcmc_resul
                 fb = propose_rewrite(proposal, current, RNG_ARGS);
                 break;
             case 1:
-                fb = propose_insert(proposal, current, RNG_ARGS);
+                //fb = propose_insert(proposal, current, RNG_ARGS);
                 break;
             case 2:
-                fb = propose_delete(proposal, current, RNG_ARGS);
+                //fb = propose_delete(proposal, current, RNG_ARGS);
                 break;
             case 3:
                 fb = propose_constants(proposal, current, RNG_ARGS);
