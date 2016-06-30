@@ -1,7 +1,7 @@
 2016 June 29:
     - Updates to new CUDA
     - Revert old change, mainly doing structure learning. 
-    
+    - Changed the "program" to be stack-based for speed. Each operation now does something to the stack, rather than being evaled like a binary tree. So we don't have to make tree-like proposals (much faster?)
 2014 Mar 9:
 	- Huge gigantic change - updated so that the main branch enumerates structures and does MCMC on constants only!
 	- structure-learning is the old branch, modifying the programs. No shared code bewteen the two, to keep the constant branch very simple (this should change in the future)

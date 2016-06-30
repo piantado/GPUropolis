@@ -1,7 +1,7 @@
  
-ITERATIONS=250 #50000 # K20: 10000 #200000   ## About 1min for each 1k, for Zipf
-OUTER_BLOCKS=200 #20  
-N=100000 #50000 # 131072 #131072 # 131072 # 128*1024
+ITERATIONS=10000 
+OUTER_BLOCKS=100 
+N=10000 
 OUTROOT=run/
 BURN=0
 
@@ -13,13 +13,13 @@ shopt -s globstar
 
 OUTROOT=./run
 
-WHICHHALF=all
+# WHICHHALF=all
 # for DATA in $(ls -d data-sources/Regression/1); do
 
 # DATA=data-sources/Regression/-10_20
 # for DATA in $(ls -d data-sources/Regression/*); do
 # DATA=data-sources/Science/BalmerSeries
-for WHICHHALF in 'first-half' 'even-half' 'all' ; do
+for WHICHHALF in 'all' 'first-half' 'even-half' ; do
 for DATA in $(ls -d data-sources/Science/*) ; do
 # for DATA in $(ls -d data-sources/Science/*)  $(ls -d data-sources/Stats/*) $(ls -d data-sources/NIST/*) ; do
 # for DATA in $(ls -d data-sources/Science/*)  $(ls -d data-sources/Stats/*) $(ls -d data-sources/NIST/*) ; do
@@ -42,7 +42,7 @@ for DATA in $(ls -d data-sources/Science/*) ; do
 	
 	# And a python post-processing script to do plotting.
 	# Run in the background so we can move to the next plot
-	nice -n 19 python postprocess.py --directory=$OUT &
+# 	nice -n 19 python postprocess.py --directory=$OUT &
 
 done
 done

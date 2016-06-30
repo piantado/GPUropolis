@@ -8,7 +8,6 @@
 // Some math
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-
 // use a define so we can work on host and device
 #define PIf 3.141592653589
 
@@ -55,19 +54,6 @@
 	
 	return int(p*n);
 }
-
-// #define RNG_DEF int& rx, int& ry, int& rz, int& rw
-// #define RNG_ARGS rx,ry,rz,rw
-// a random number 0..(n-1), using the stored locations for x,y,z,q
-// __device__ __host__ int random_int(int n, RNG_DEF) {
-// 	int t;
-//  
-// 	t = rx ^ ( rx << 11);
-// 	rx = ry; ry = rz; rz = rw;
-// 	rw = rw ^ (rw >> 19) ^ (t ^ (t >> 8));
-// 	
-// 	return (rw%n);
-// }
 
 __device__ __host__ int random_flip(RNG_DEF) {
 	return random_int(2, RNG_ARGS);
@@ -117,7 +103,7 @@ __device__ __host__ float ltruncated_geometric(int x, float P, int m){
 // Statistical functions
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-__device__ __host__ float lexponentialpdf(float x, float r) {
+__device__ __host__ float lexponentialpdf(float x, float r) { // r exp(-r x)
 	if(x < 0.0f){ return -1.0f/0.0f; }
 	return log(r) - r*x;
 }
@@ -136,6 +122,11 @@ __device__ __host__ float luniformpdf( float x ){
 	if(x<0.0f || x>1.0f){ return -1.0f/0.0f; }
 	return 0.0f;
 }
+
+__device__ __host__ float lcauchypdf( float x, float s ){
+    return -log(PIf) - log(s) - log(1+x*x/s);
+}
+
 
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

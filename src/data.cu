@@ -12,17 +12,6 @@
 
 using namespace std;
 
-// what type is the program?
-typedef float data_t;
-
-// A struct for storing data
-typedef struct datum {
-	data_t input;
-	data_t output;
-	data_t sd; // stdev of the output|input. 
-} datum;
-
-
 // Load data froma  file, putting it into our structs.
 // This allows us to trim our data if we want
 vector<datum>* load_data_file(const char* datapath, int FIRST_HALF_DATA, int EVEN_HALF_DATA) {
