@@ -2,10 +2,11 @@
   Structures and data types universally imported
 */
 
+
 #ifndef SPEC_H
 #define SPEC_H
 
-typedef int op_t; // what type is the program primitives?
+typedef short op_t; // what type is the program primitives?
 typedef float data_t; // what type is the data and stack?
 
 // A struct for storing a hypothesis, which is a program and some accoutrements

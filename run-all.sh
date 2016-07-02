@@ -17,10 +17,10 @@ OUTROOT=./run
 # for DATA in $(ls -d data-sources/Regression/1); do
 
 # DATA=data-sources/Regression/-10_20
-# for DATA in $(ls -d data-sources/Regression/*); do
 # DATA=data-sources/Science/BalmerSeries
-for WHICHHALF in 'all' 'first-half' 'even-half' ; do
-for DATA in $(ls -d data-sources/Science/*) ; do
+# for WHICHHALF in 'all' 'first-half' 'even-half' ; do
+for DATA in $(ls -d data-sources/Regression/*); do
+# for DATA in $(ls -d data-sources/Science/*) ; do
 # for DATA in $(ls -d data-sources/Science/*)  $(ls -d data-sources/Stats/*) $(ls -d data-sources/NIST/*) ; do
 # for DATA in $(ls -d data-sources/Science/*)  $(ls -d data-sources/Stats/*) $(ls -d data-sources/NIST/*) ; do
 
@@ -45,4 +45,4 @@ for DATA in $(ls -d data-sources/Science/*) ; do
 # 	nice -n 19 python postprocess.py --directory=$OUT &
 
 done
-done
+# done
