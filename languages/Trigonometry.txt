@@ -1,7 +1,0 @@
-# Name, NumberOfArgs, Stack operation (in CUDA/C)
-SIN	1	my_sin(stack[top])
-ASIN	1	my_asin(stack[top])
-COS	1	my_cos(stack[top])
-ACOS	1	my_acos(stack[top])
-TAN	1	my_tan(stack[top])
-ATAN	1	my_atan(stack[top])

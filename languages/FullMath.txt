@@ -1,7 +1,0 @@
-# Name, NumberOfArgs, Stack operation (in CUDA/C)
-ABS	1	my_abs(stack[top])
-ROUND	1	my_round(stack[top])
-GAMMA	1	my_gamma(stack[top])
-SGN	1	my_sgn(stack[top])
-SQRT	1	my_sqrt(stack[top])
-

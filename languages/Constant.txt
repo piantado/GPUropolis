@@ -1,2 +1,0 @@
-# Name, NumberOfArgs, Stack operation (in CUDA/C)
-CONSTANT	0	(constant_i<MAX_CONSTANTS) * h->constants[constant_i]; constant_i += (constant_i<MAX_CONSTANTS)

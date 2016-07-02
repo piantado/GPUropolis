@@ -1,4 +1,0 @@
-# Name, NumberOfArgs, Stack operation (in CUDA/C)
-LOG	1	my_log(stack[top])
-EXP	1	my_exp(stack[top])
-POW	2	my_pow(stack[top], stack[top-1])
