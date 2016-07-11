@@ -17,6 +17,9 @@ enum CONSTANT_TYPES { GAUSSIAN, EXPONENTIAL, UNIFORM,  LOGNORMAL, CAUCHY, __N_CO
 
 #define COPY_HYPOTHESIS(x,y) memcpy( (void*)(x), (void*)(y), sizeof(hypothesis));
 
+// a bad log prob to return for NANs. -inf is finicky on CUDA
+#define BAD_LP (-9e99)
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // Bayes on hypotheses
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -44,24 +47,34 @@ __device__ float f_output(float x, hypothesis* h, float* stack);
 __device__ float compute_likelihood(int DLEN, datum* device_data, hypothesis* h, float* stack) {
 
 	float ll = 0.0;
+    
 	for(int i=0;i<DLEN;i++){
 		//__syncthreads(); // NOT a speed improvement
 		
 		float val = f_output( device_data[i].input, h, stack);
 		
+        if(!is_valid(val)) { 
+            h->likelihood = BAD_LP;
+            return h->likelihood;
+        }
+        
 		// compute the difference between the output and what we see
 		data_t d = device_data[i].output - val;
 		
 		// and use a gaussian likelihood
 		ll += lnormalpdf(d, device_data[i].sd);
+        
 	}
 	
 	// ensure valid
-	if (!is_valid(ll)) ll = -1.0f/0.0f;
-	
- 	h->likelihood = ll / LL_TEMPERATURE;
-	
-	return h->likelihood;
+	if (!is_valid(ll)) { 
+        h->likelihood = BAD_LP;
+        return h->likelihood;
+    }
+	else {
+        h->likelihood = ll / LL_TEMPERATURE;
+		return h->likelihood;
+    }
 	
 }
 
@@ -133,8 +146,8 @@ __device__ void compute_posterior(int DLEN, datum* device_data, hypothesis* h, f
 
 // A standard initialization that sets this thing up!
 void initialize(hypothesis* h, RNG_DEF){
-    h->posterior = -1.0/0.0;
-    h->prior = -1.0/0.0;
+    h->posterior = BAD_LP;
+    h->prior = BAD_LP;
     h->likelihood = 0.0;
     
     // zero the program
