@@ -150,7 +150,7 @@ void initialize(hypothesis* h, RNG_DEF){
     h->prior = BAD_LP;
     h->likelihood = 0.0;
     
-    // zero the program
+    // randomize the program
     for(int i=0;i<MAX_PROGRAM_LENGTH;i++)
         h->program[i] = random_op(RNG_ARGS); 
     

@@ -111,20 +111,16 @@ __global__ void MH_simple_kernel(int N, mcmc_specification* all_spec, mcmc_resul
 	float acceptance_temperature = spec->acceptance_temperature;
 	int data_length              = spec->data_length;
 	datum* data                  = spec->data;
-	
-	// set up our data stack array
-	data_t stack[STACK_SIZE];
+    data_t* stack                = spec->stack; // stack for processing
 	
 	// Set up for the RNG
  	int rx = spec->rng_seed;
 	
-	hypothesis current_, proposal_;
-	hypothesis *current=&current_, *proposal=&proposal_;
-    
-	COPY_HYPOTHESIS(current, &(result->sample)); // copy to most recent sample back to myself
+    hypothesis* current  = &result->sample; // store this in result
+    hypothesis* proposal = &spec->proposal;
 	
 	current->chain_index = idx;	// which chain did you come from?
-
+    
 	compute_posterior(data_length, data, current, stack);
     
 	// initialize everything to be the current
@@ -149,10 +145,10 @@ __global__ void MH_simple_kernel(int N, mcmc_specification* all_spec, mcmc_resul
                 fb = propose_rewrite(proposal, current, RNG_ARGS);
                 break;
             case 1:
-                //fb = propose_insert(proposal, current, RNG_ARGS);
+                fb = propose_insert(proposal, current, RNG_ARGS);
                 break;
             case 2:
-                //fb = propose_delete(proposal, current, RNG_ARGS);
+                fb = propose_delete(proposal, current, RNG_ARGS);
                 break;
             case 3:
                 fb = propose_constants(proposal, current, RNG_ARGS);
@@ -188,8 +184,9 @@ __global__ void MH_simple_kernel(int N, mcmc_specification* all_spec, mcmc_resul
 	
 	result->proposal_count += iterations;
 	
-	// and yield this sample
-	COPY_HYPOTHESIS(&(result->sample), current);
+	// and copy over if current is pointing to our old proposal
+    if(current != &(result->sample))
+        COPY_HYPOTHESIS(&(result->sample), current);
 	
 }
  

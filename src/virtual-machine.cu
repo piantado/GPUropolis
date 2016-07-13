@@ -32,21 +32,21 @@ __device__ data_t f_output(data_t X, hypothesis* h, data_t* stack) {
                 stack[top] = h->constants[constant_i%MAX_CONSTANTS]; 
                 constant_i++;
                 break;
-            case X_:    stack[top++] = X; break;
-            case ZERO_: stack[top++] = 0.0f; break;
-            case ONE_:  stack[top++] = 1.0f; break;
+            case X_:    top++; stack[top] = X; break;
+            case ZERO_: top++; stack[top] = 0.0f; break;
+            case ONE_:  top++; stack[top] = 1.0f; break;
             
             // These leave the stack unchanged
-            case EXP_:  stack[top] = my_exp(stack[top]); break;
-            case LOG_: stack[top] = my_log(stack[top]); break;
-            case NEG_: stack[top] = my_neg(stack[top]); break;
+            case EXP_: stack[top] = expf(stack[top]); break;
+            case LOG_: stack[top] = logf(stack[top]); break;
+            case NEG_: stack[top] = -(stack[top]); break;
             
             // these pop one off the stack
-            case MUL_: top--; stack[top] = my_mul(stack[top+1], stack[top]); break;
-            case POW_: top--; stack[top] = my_pow(stack[top+1], stack[top]); break;
-            case ADD_: top--; stack[top] = my_add(stack[top+1], stack[top]); break;
-            case DIV_: top--; stack[top] = my_div(stack[top+1], stack[top]); break;
-            case SUB_: top--; stack[top] = my_add(stack[top+1], -stack[top]); break;
+            case MUL_: top--; stack[top] = (stack[top+1] * stack[top]); break;
+            case POW_: top--; stack[top] = powf(stack[top+1],stack[top]); break;
+            case ADD_: top--; stack[top] = (stack[top+1] + stack[top]); break;
+            case DIV_: top--; stack[top] = (stack[top+1] / stack[top]); break;
+            case SUB_: top--; stack[top] = (stack[top+1] - stack[top]); break;
             
             // control flow
             case RET_:  goto DONE; 

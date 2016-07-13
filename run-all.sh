@@ -1,6 +1,6 @@
  
-ITERATIONS=10000 
-OUTER_BLOCKS=100 
+ITERATIONS=10000
+OUTER_BLOCKS=100
 N=1000
 OUTROOT=run/
 BURN=0
@@ -19,7 +19,9 @@ OUTROOT=./run
 # DATA=data-sources/Regression/-10_20
 # DATA=data-sources/Science/BalmerSeries
 # for WHICHHALF in 'all' 'first-half' 'even-half' ; do
-for DATA in $(ls -d data-sources/Regression/*); do
+# for DATA in $(ls -d data-sources/Regression/*); do
+# for DATA in $(ls -d data-sources/Regression/60_100); do
+for DATA in $(ls -d data-sources/Science/Galileo); do
 # for DATA in $(ls -d data-sources/Science/*) ; do
 # for DATA in $(ls -d data-sources/Science/*)  $(ls -d data-sources/Stats/*) $(ls -d data-sources/NIST/*) ; do
 # for DATA in $(ls -d data-sources/Science/*)  $(ls -d data-sources/Stats/*) $(ls -d data-sources/NIST/*) ; do

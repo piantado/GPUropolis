@@ -16,7 +16,7 @@
 #include "cuPrintf.cu" //!
 
 // not computed on chains but in the actual prior and likelihood:
-const float PRIOR_TEMPERATURE = 1.0;
+const float PRIOR_TEMPERATURE = 10.0;
 const float LL_TEMPERATURE = 1.0;
 
 // in MCMC only (not on hypotheses)

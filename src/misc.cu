@@ -22,7 +22,7 @@
 
 // check nans. isfinite requires finite and non-nan
 
-#define is_valid(x) (isfinite(x))
+#define is_valid(x) (isfinite(x) && (x!=CUDART_NAN_F))
 #define is_invalid(x) (!is_valid(x))
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // Functions for avoiding branching. Most of these are just slow

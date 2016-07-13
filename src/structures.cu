@@ -36,9 +36,13 @@ typedef struct mcmc_specification {
     unsigned int iterations; // how many steps to run?
     int rng_seed;
     
+    hypothesis proposal;
+    data_t stack[STACK_SIZE];
+    
     // and pointers to the data we want
     int data_length;
     datum* data;
+
     
 } mcmc_specification;
 
