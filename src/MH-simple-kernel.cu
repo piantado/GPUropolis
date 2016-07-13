@@ -69,15 +69,19 @@ __device__ float propose_delete(hypothesis* to, hypothesis* from, RNG_DEF){
 __device__ float propose_constants(hypothesis* to, hypothesis* from, RNG_DEF){
     
     COPY_HYPOTHESIS( to, from );
-    
-//     int nc = count_constants(from); // only propose to constants that exist
-//     int k = random_int(nc, RNG_ARGS);
+  
+    // we'll propose a random scaling factor increase or decrease
+    float r = random_float(RNG_ARGS); // percent change up or down
     
     int k = random_int(MAX_CONSTANTS, RNG_ARGS);
-    
-    float old_value = from->constants[k];
-    to->constants[k] = old_value + random_normal(RNG_ARGS); // symmetric 
-    
+
+    if(random_int(2,RNG_ARGS) == 1) {
+        to->constants[k] = from->constants[k]*(1.0+r*0.1);
+    }
+    else {
+        to->constants[k] = from->constants[k]/(1.0+r*0.1);
+    }
+       
     return 0.0;
 }
 
