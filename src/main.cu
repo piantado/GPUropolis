@@ -16,7 +16,7 @@
 #include "cuPrintf.cu" //!
 
 // not computed on chains but in the actual prior and likelihood:
-const float PRIOR_TEMPERATURE = 10.0;
+const float PRIOR_TEMPERATURE = 1.0;
 const float LL_TEMPERATURE = 1.0;
 
 // in MCMC only (not on hypotheses)
@@ -106,9 +106,9 @@ void host_run_MCMC(int N, mcmc_specification* host_spec, mcmc_results* host_mcmc
 	for(int outer=0;outer<OUTER_BLOCKS+BURN_BLOCKS;outer++) {
 		double secDEVICE=0.0, secHOST=0.0, secTRANSFER=0.0; // how long do we spend on each?	
 		
-		// Set up the rng (also we can anneal here if we want)
+		// Set up the rng
 		for(int i=0;i<N;i++) {
-			host_spec[i].rng_seed = seed + (1+outer)*N*(i+1); // set this seed; i+1 and outer+1 here prevent us getting a zero
+			host_spec[i].rng_seed = seed + (1+outer)*N + (i+1); // set this seed; i+1 and outer+1 here prevent us getting a zero
 		}
 		
 		// copy to host

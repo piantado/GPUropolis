@@ -9,7 +9,7 @@
 // Set program length and number of constants
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-enum CONSTANT_TYPES { GAUSSIAN, EXPONENTIAL, UNIFORM,  LOGNORMAL, CAUCHY, __N_CONSTANT_TYPES};
+enum CONSTANT_TYPES { GAUSSIAN, EXPONENTIAL,  LOGNORMAL, CAUCHY, __N_CONSTANT_TYPES};
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // Hypothesis
@@ -31,13 +31,13 @@ __device__ __host__ op_t random_op(RNG_DEF) {
     return random_int(NUM_OPS, RNG_ARGS); // TODO: CHECK 
 }
 
-// Randomize the constants
-__device__  __host__ float randomize_constants(hypothesis* h, RNG_DEF) {
+// Randomize the constants, returning their lp
+__device__  __host__ void randomize_constants(hypothesis* h, RNG_DEF) {
+    
     for(int k=0;k<MAX_CONSTANTS;k++) {
         h->constants[k] = random_normal(RNG_ARGS);
         h->constant_types[k] = random_int(__N_CONSTANT_TYPES, RNG_ARGS);
     }
-    return 0.0;
 }
 
 // These are used below but defined for real elsewhere
@@ -105,7 +105,7 @@ __device__ float compute_constants_prior(hypothesis* h) {
             case LOGNORMAL:   lp += llnormalpdf(value, 1.0); break;
             case CAUCHY:      lp += lcauchypdf(value, 1.0); break;
             case EXPONENTIAL: lp += lexponentialpdf(value, 1.0); break;
-            case UNIFORM:     lp += luniformpdf(value); break;  
+//             case UNIFORM:     lp += luniformpdf(value); break;  // this is a problem because it gives crazy values for the constants!
         }
     }
     

@@ -10,13 +10,12 @@
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 // make a proposal from from to to, 
-// TODO: Allow for inserting rather than overwriting?
 __device__ float propose_rewrite(hypothesis* to, hypothesis* from, RNG_DEF){
     
     COPY_HYPOTHESIS( to, from );
     
     // insert between start and stop, shifting by shift
-    int start = random_int(MAX_PROGRAM_LENGTH-1, RNG_ARGS); // TODO: Check off by 1?
+    int start = random_int(MAX_PROGRAM_LENGTH-1, RNG_ARGS);
     int stop  = start+random_int(MAX_PROGRAM_LENGTH-start, RNG_ARGS); 
     
     for(int p=start;p<stop;p++){
@@ -76,10 +75,10 @@ __device__ float propose_constants(hypothesis* to, hypothesis* from, RNG_DEF){
     int k = random_int(MAX_CONSTANTS, RNG_ARGS);
 
     if(random_int(2,RNG_ARGS) == 1) {
-        to->constants[k] = from->constants[k]*(1.0+r*0.1);
+        to->constants[k] = from->constants[k]*(1.0+r*0.01);
     }
     else {
-        to->constants[k] = from->constants[k]/(1.0+r*0.1);
+        to->constants[k] = from->constants[k]/(1.0+r*0.01);
     }
        
     return 0.0;
@@ -93,6 +92,25 @@ __device__ float propose_constant_types(hypothesis* to, hypothesis* from, RNG_DE
     to->constant_types[k] = random_int(__N_CONSTANT_TYPES, RNG_ARGS);
     
     return 0.0;
+}
+   
+// just resample from the prior
+__device__ float prior_propose(hypothesis* to, hypothesis* from, RNG_DEF){
+    
+    for(int i=0;i<MAX_PROGRAM_LENGTH;i++)
+        to->program[i] = random_op(RNG_ARGS); 
+    
+    // randomize constants and their types
+    randomize_constants(to, RNG_ARGS);
+    
+    
+    // now we have to get the forward - backward
+    float fb = 0.0;
+    for(int k=0;k<MAX_CONSTANTS;k++) {
+        fb += lnormalpdf(to->constants[k], 1.0) - lnormalpdf(from->constants[k], 1.0);
+    }
+    
+    return fb;
 }
    
 
@@ -144,7 +162,7 @@ __global__ void MH_simple_kernel(int N, mcmc_specification* all_spec, mcmc_resul
         
         // use a switch case to set the probability of each kind of proposal
         // NOTE: This means if we just run 1 or 2 steps, we will only get structural proposals
-        switch(mcmci%5){
+        switch(mcmci%6){
             case 0:
                 fb = propose_rewrite(proposal, current, RNG_ARGS);
                 break;
@@ -159,6 +177,9 @@ __global__ void MH_simple_kernel(int N, mcmc_specification* all_spec, mcmc_resul
                 break;
             case 4:
                 fb = propose_constant_types(proposal, current, RNG_ARGS);
+                break;
+            case 5:
+                fb = prior_propose(proposal, current, RNG_ARGS);
                 break;
         }
 

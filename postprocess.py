@@ -73,7 +73,7 @@ ys = numpy.array(ys)
 sds = numpy.array(sds)
 
 # TODO: Oh my god, we have to include the original x because it may matter for 
-# fractional data points!! If we don't, then sometimes hypotehses fail to evaluate because
+# fractional data points!! If we don't, then sometimes hypotheses fail to evaluate because
 # the hypotheses have fractional powers that are not defined for fractional data.
 # This was fixed most recently by disallowing negative fractional powers, but we may want to change that in the future...
 newx = numpy.arange(0.99*min(xs), max(xs)*1.01, (1.01*max(xs)-0.99*min(xs))/float(NCURVEPTS))

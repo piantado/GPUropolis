@@ -21,8 +21,8 @@ OUTROOT=./run
 # for WHICHHALF in 'all' 'first-half' 'even-half' ; do
 # for DATA in $(ls -d data-sources/Regression/*); do
 # for DATA in $(ls -d data-sources/Regression/60_100); do
-for DATA in $(ls -d data-sources/Science/Galileo); do
-# for DATA in $(ls -d data-sources/Science/*) ; do
+# for DATA in $(ls -d data-sources/Science/COBE); do
+for DATA in $(ls -d data-sources/Science/*) ; do
 # for DATA in $(ls -d data-sources/Science/*)  $(ls -d data-sources/Stats/*) $(ls -d data-sources/NIST/*) ; do
 # for DATA in $(ls -d data-sources/Science/*)  $(ls -d data-sources/Stats/*) $(ls -d data-sources/NIST/*) ; do
 
