@@ -198,12 +198,12 @@ __global__ void MH_simple_kernel(int N, mcmc_specification* all_spec, mcmc_resul
 			
 			// update the chain acceptance count
 			result->acceptance_count++;
-			
-			// and update the MAP if we should
-			if(current->posterior > result->MAP.posterior || is_invalid(result->MAP.posterior)){
- 				COPY_HYPOTHESIS( &(result->MAP), current);
-			}
 		} // end if swap*/
+		
+		// and update the MAP if we should
+		if(current->posterior > result->MAP.posterior || is_invalid(result->MAP.posterior)){
+			COPY_HYPOTHESIS( &(result->MAP), current);
+		}
 		
 	} // end main mcmc
 	
