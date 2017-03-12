@@ -1,9 +1,0 @@
-# Taken from http://en.wikipedia.org/wiki/Balmer_series
-# Here the stderrs are fixed artificially to be tiny!
-3	656.3	1.0
-4	486.1	1.0
-5	434.1	1.0
-6	410.2	1.0
-7	397.0	1.0
-8	388.9	1.0
-9	383.5	1.0
