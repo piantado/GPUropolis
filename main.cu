@@ -4,6 +4,7 @@
  * Simple tree-regeneration on CUDA with coalesced memory access
  * 
  * TOOD: Try copying in the kernel into shared memory
+ *       Can always scale x and output
  */
 
 #include <stdio.h>
@@ -12,19 +13,21 @@
 #include <assert.h>
 #include <cuda_runtime.h>
 #include <iostream>
-// #include <helper_functions.h>
 #include <getopt.h>
 #include <string.h>
 #include <vector>
-//#include "cuPrintf.cu" // For cuda print
 #include "math_constants.h" // Needed to define CUDART_NAN_F
 
 using namespace std;
 
-const float PRIOR_MULTIPLIER = 1.0; 
+const float PRIOR_MULTIPLIER = 10.0; 
+const float CONST_PRIOR = 1.0; // how much prior do we pay per constant used?
 
 const int PROGRAM_LENGTH = 15;
-const int NCONSTANTS     = 8; 
+const int NCONSTANTS     = 16;
+
+const int CONSTANT_SCALE = 10.0; // Maybe set to be the SD of the y values, fucntions as a scale over the constants in teh prior, proprosals
+
 
 // Setup for gpu hardware 
 const int BLOCK_SIZE = 128;
@@ -41,20 +44,29 @@ typedef struct datum {
     float sd; // stdev of the output|input. 
 } datum;
 
-enum OPS { ZERO, ONE, A, B, PLUS, MINUS, DIV, LOG, SIN, EXP, POW, NOPS};
+enum OPS { ZERO, ONE, X, A, B, PLUS, MINUS, RMINUS, DIV, RDIV, LOG, EXP, POW, SQRT, SIN, ASIN, ATAN, NOPS};
+const int SQR = -99;
 
 
 // -----------------------------------------------------------------------
 // Memory Macros
 // -----------------------------------------------------------------------     
 
+#define CUDA_CHECK() { \
+    do {\
+        cudaError_t err = cudaGetLastError(); \
+        if(err != cudaSuccess) \
+            printf("CUDA error: %s\n", cudaGetErrorString(err));\
+        } while(0);\
+    }
+    
 // Macro for defining arrays with name device_name, and then copying name over
 #define DEVARRAY(type, nom, size) \
     type* device_ ## nom;\
     cudaMalloc((void **) &device_ ## nom, size*sizeof(type)); \
     cudaMemcpy(device_ ## nom, host_ ## nom, size*sizeof(type), cudaMemcpyHostToDevice);\
-    if(cudaGetLastError() != cudaSuccess) {  printf("CUDA error on allocating " #nom ": %s\n", cudaGetErrorString(cudaGetLastError())); } 
-
+    CUDA_CHECK()
+    
 // -----------------------------------------------------------------------
 // Numerics
 // -----------------------------------------------------------------------     
@@ -104,7 +116,18 @@ float random_normal() {
     float v = float(rand())/RAND_MAX;
     return sqrtf(-2.0*log(u)) * sin(2*PIf*v);
 }
+
+__device__ float random_cauchy(RNG_DEF) {
+    float u = random_normal(RNG_ARGS);
+    float v = random_normal(RNG_ARGS);
+    return u/v;
+}
    
+float random_cauchy() {
+    float u = random_normal();
+    float v = random_normal();
+    return u/v;
+}
    
 __device__ __host__ float lnormalpdf( float x, float s ){
     return -(x*x)/(2.0*s*s) - 0.5 * (logf(2.0*PIf) + 2.0*logf(s));
@@ -184,42 +207,55 @@ vector<datum>* load_data_file(const char* datapath, int FIRST_HALF_DATA, int EVE
    
 // TODO: Make inline
 // evaluat a single operation op on arguments a and b
-__device__ float dispatch(op o, float a, float b) {
+__device__ float dispatch(op o, float x, float a, float b) {
         switch(o) {
-            case ZERO: return 0.0;
-            case ONE:  return 1.0;
-            case A:    return a; 
-            case B:    return b; // need both since of how consts are passed in
-            case PLUS: return a+b;
-            case MINUS: return a-b;
-            case DIV:   return a/b;
-            case LOG:   return logf(a);
-            case SIN:   return sin(a);
-            case EXP:   return expf(a);
-            case POW:   return powf(a,b);
-            default:    return CUDART_NAN_F;
+            case ZERO:   return 0.0;
+            case ONE:    return 1.0;
+            case X:      return x;
+            case A:      return a; 
+            case B:      return b; // need both since of how consts are passed in
+            case PLUS:   return a+b;
+            case MINUS:  return a-b;
+            case RMINUS: return b-a;
+            case DIV:    return a/b;
+            case RDIV:   return b/a;
+            case SQRT:   return sqrtf(a);
+            case SQR:    return a*a;
+            case LOG:    return logf(a);
+            case SIN:    return sin(a);
+            case ASIN:   return asinf(a);
+            case ATAN:   return atanf(a/b);
+            case EXP:    return expf(a);
+            case POW:    return powf(a,b);
+            default:     return CUDART_NAN_F;
         }    
 }
 
-// Call the function encoded by P and C
 __device__ float call(int N, int idx, op* P, float* C, float x) {
-            float f0 = dispatch(P[idx+0*N], x, C[idx+0*N]);
-            float f1 = dispatch(P[idx+1*N], x, C[idx+1*N]);
-        float f2 = dispatch(P[idx+2*N], f0, f1);
-            float f3 = dispatch(P[idx+3*N], x, C[idx+2*N]);
-            float f4 = dispatch(P[idx+4*N], x, C[idx+3*N]);
-        float f5 = dispatch(P[idx+5*N], f3, f4);
-    float f6 = dispatch(P[idx+6*N], f2, f5);
-            float f7 = dispatch(P[idx+7*N], x, C[idx+4*N]);
-            float f8 = dispatch(P[idx+8*N], x, C[idx+5*N]);
-        float f9 = dispatch(P[idx+9*N], f7, f8);
-            float f10 = dispatch(P[idx+10*N], x, C[idx+6*N]);
-            float f11 = dispatch(P[idx+11*N], x, C[idx+7*N]);
-        float f12 = dispatch(P[idx+12*N], f10, f11);
-    float f13 = dispatch(P[idx+13*N], f9, f12);
-
-    return dispatch(P[idx+14*N], f6, f13);
+    float f0 = dispatch(P[idx+0*N], x, C[idx+0*N], C[idx+1*N]);
+    float f1 = dispatch(P[idx+1*N], x, C[idx+2*N], C[idx+3*N]);
+    float f2 = dispatch(P[idx+2*N], x, f0, f1);
+    
+    float f3 = dispatch(P[idx+3*N], x, C[idx+4*N], C[idx+5*N]);
+    float f4 = dispatch(P[idx+4*N], x, C[idx+6*N], C[idx+7*N]);
+    float f5 = dispatch(P[idx+5*N], x, f3, f4);
+    
+    float f6 = dispatch(P[idx+6*N], x, f2, f5);
+    
+    
+    float f7 = dispatch(P[idx+7*N], x, C[idx+8*N], C[idx+9*N]);
+    float f8 = dispatch(P[idx+8*N], x, C[idx+10*N], C[idx+11*N]);
+    float f9 = dispatch(P[idx+9*N], x, f7, f8);
+    
+    float f10 = dispatch(P[idx+10*N], x, C[idx+12*N], C[idx+13*N]);
+    float f11 = dispatch(P[idx+11*N], x, C[idx+14*N], C[idx+15*N]);
+    float f12 = dispatch(P[idx+12*N], x, f10, f11);
+    
+    float f13 = dispatch(P[idx+13*N], x, f9, f12);
+    
+    return dispatch(P[idx+14*N], x, f6, f13);
 }
+
 __device__ float compute_likelihood(int N, int idx, op* P, float* C, datum* D, int ndata) {
     float ll = 0.0; // total ll 
     for(int di=0;di<ndata;di++) {
@@ -233,16 +269,61 @@ __device__ float compute_likelihood(int N, int idx, op* P, float* C, datum* D, i
     
 }
 
+__device__ float prior_dispatch(op o, float a, float b) {
+    // count up the length for the prior
+        switch(o) {
+            case ZERO: return 0.0;
+            case ONE:  return 0.0;
+            case X:    return 0.0;
+            case A:    return a; 
+            case B:    return b; // need both since of how consts are passed in
+            case PLUS: return 1+a+b;
+            case MINUS: return 1+a+b;
+            case RMINUS: return 1+b+a;
+            case DIV:   return 1+a+b;
+            case RDIV:   return 1+a+b;
+            case SQRT:  return 1+a;
+            case SQR:   return 1+a;
+            case LOG:   return 1+a;
+            case SIN:   return 1+a;
+            case ASIN:   return 1+a;
+            case ATAN:   return 1+a+b;
+            case EXP:   return 1+a;
+            case POW:   return 1+a+b;
+            default:    return CUDART_NAN_F;
+        }    
+}
+
 __device__ float compute_prior(int N, int idx, op* P, float* C) {
     // compute the prior
-    float prior = 0.0;
-    for(int i=0;i<PROGRAM_LENGTH;i++) {
-        op o = P[idx+i*N];
-        prior += -PRIOR_MULTIPLIER*(o!=A && o!=B && o!=ZERO);
-    }
     
+    int l0 = prior_dispatch(P[idx+0*N], CONST_PRIOR, CONST_PRIOR);
+    int l1 = prior_dispatch(P[idx+1*N], CONST_PRIOR, CONST_PRIOR);
+    int l2 = prior_dispatch(P[idx+2*N], l0, l1);
+    
+    int l3 = prior_dispatch(P[idx+3*N], CONST_PRIOR, CONST_PRIOR);
+    int l4 = prior_dispatch(P[idx+4*N], CONST_PRIOR, CONST_PRIOR);
+    int l5 = prior_dispatch(P[idx+5*N], l3, l4);
+    
+    int l6 = prior_dispatch(P[idx+6*N], l2, l5);
+    
+    
+    int l7 = prior_dispatch(P[idx+7*N], CONST_PRIOR, CONST_PRIOR);
+    int l8 = prior_dispatch(P[idx+8*N], CONST_PRIOR, CONST_PRIOR);
+    int l9 = prior_dispatch(P[idx+9*N], l7, l8);
+    
+    int l10 = prior_dispatch(P[idx+10*N], CONST_PRIOR, CONST_PRIOR);
+    int l11 = prior_dispatch(P[idx+11*N], CONST_PRIOR, CONST_PRIOR);
+    int l12 = prior_dispatch(P[idx+12*N], l10, l11);
+    
+    int l13 = prior_dispatch(P[idx+13*N], l9, l12);
+    
+    int len = prior_dispatch(P[idx+14*N], l6, l13);
+    
+    float prior = -PRIOR_MULTIPLIER * len;
+
     for(int c=0;c<NCONSTANTS;c++) {
-        prior += lcauchypdf(C[idx+c*N], 1.0); // proportional to cauchy density
+        prior += lcauchypdf(C[idx+c*N], CONSTANT_SCALE); // proportional to cauchy density
     }
     
     return prior;
@@ -258,56 +339,60 @@ __global__ void MH_simple_kernel(int N, op* P, float* C, datum* D, int ndata, in
 	int idx = blockIdx.x * blockDim.x + threadIdx.x;
 	if(idx >= N) { return; }  // MUST have this or else all hell breaks loose
 
-        float current_prior = compute_prior(N, idx, P, C);
-        float current_likelihood = compute_likelihood(N, idx, P, C, D, ndata);
-        float current = current_prior + current_likelihood;
-        
-        // Two possibilities here. We could let everything do the same proposals (for all steps) in which case we don't
-        // add idx. This makes them access the same memory, etc. Alternatively we could add idx and make them separate
-        // doesn't seem to matter much for speed
-//         int rx = random_seed;     
+    float current_prior = compute_prior(N, idx, P, C);
+    float current_likelihood = compute_likelihood(N, idx, P, C, D, ndata);
+    float current = current_prior + current_likelihood;
+    
+    // Two possibilities here. We could let everything do the same proposals (for all steps) in which case we don't
+    // add idx. This makes them access the same memory, etc. Alternatively we could add idx and make them separate
+    // doesn't seem to matter much for speed
+    // int rx = random_seed;     
 	int rx = random_seed + idx; // NOTE: We might want to call cuda_rand here once so that we don't have a bias from low seeds
     
 	for(int mcmci=0;mcmci<steps;mcmci++) {
         
-	    if(mcmci%2==0) { // propose to a constant 
-		int i = idx + N*random_int(NCONSTANTS, RNG_ARGS);
-		float old = C[i];
-		C[i] = C[i] + random_normal(RNG_ARGS); 
-		
+	    if(mcmci & 0x1 == 0x1) { // propose to a structure every this often
+                
+                int i = idx + N*random_int(PROGRAM_LENGTH, RNG_ARGS);
+                op old = P[i];
+                P[i] = random_int(NOPS, RNG_ARGS);
+                
                 float proposal_prior = compute_prior(N, idx, P, C);
                 float proposal_likelihood = compute_likelihood(N, idx, P, C, D, ndata);
                 float proposal = proposal_prior + proposal_likelihood;
-// 		__syncthreads(); // MUCH slower, and unneeded
-                
-		if((is_valid(proposal) && (proposal>current || random_float(RNG_ARGS) < expf(proposal-current))) || is_invalid(current)) {
-//                 if(proposal>current) {
+                        
+                if((is_valid(proposal) && (proposal>current || random_float(RNG_ARGS) < expf(proposal-current))) || is_invalid(current)) {
                     current = proposal; // store the updated posterior
                     current_likelihood = proposal_likelihood;
                     current_prior = proposal_prior;
-                    
                 } else {
-		  C[i] = old; // restore the old version
-		}
+                    P[i] = old; // restore the old version
+                }
+
 		
-	    } else { // propose to a structure
-		int i = idx + N*random_int(PROGRAM_LENGTH, RNG_ARGS);
-		op old = P[i];
-		P[i] = random_int(NOPS, RNG_ARGS);
-		
+	    } else { // propose to a constant otherwise
+                
+                int i = idx + N*random_int(NCONSTANTS, RNG_ARGS);
+                float old = C[i];
+    //              C[i] = C[i] + random_normal(RNG_ARGS); 
+                C[i] = C[i] + CONSTANT_SCALE*random_cauchy(RNG_ARGS); 
+    //             if(random_int(2,RNG_ARGS) == 1)
+    //                 C[i] = C[i] * (1.0+0.1*random_normal(RNG_ARGS)); 
+    //             else
+    //                 C[i] = C[i] / (1.0+0.1*random_normal(RNG_ARGS)); 
+                
                 float proposal_prior = compute_prior(N, idx, P, C);
                 float proposal_likelihood = compute_likelihood(N, idx, P, C, D, ndata);
                 float proposal = proposal_prior + proposal_likelihood;
-// 		__syncthreads(); // MUCH slower, and unneeded
-                
-		if((is_valid(proposal) && (proposal>current || random_float(RNG_ARGS) < expf(proposal-current))) || is_invalid(current)) {
-//                 if(proposal>current) {
+                        
+                if((is_valid(proposal) && (proposal>current || random_float(RNG_ARGS) < expf(proposal-current))) || is_invalid(current)) {
                     current = proposal; // store the updated posterior
                     current_likelihood = proposal_likelihood;
                     current_prior = proposal_prior;
-		} else {
-		  P[i] = old; // restore the old version
-		}
+                } else {
+                    C[i] = old; // restore the old version
+                }
+                
 		
 	    }
           
@@ -325,60 +410,68 @@ __global__ void MH_simple_kernel(int N, op* P, float* C, datum* D, int ndata, in
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 void string_dispatch( char* target, op o, const char* a, const char* b) {
         switch(o) {
-            case ZERO: strcat(target, "0"); break;
-            case ONE:  strcat(target, "1");break;
-            case A:    strcat(target, a); break;
-            case B:    strcat(target, b); break;// need both since of how consts are passed in
-            case PLUS: strcat(target, "("); strcat(target, a); strcat(target, "+"); strcat(target, b); strcat(target, ")"); break;
-            case MINUS:strcat(target, "("); strcat(target, a); strcat(target, "-"); strcat(target, b); strcat(target, ")"); break;
-            case DIV:  strcat(target, "("); strcat(target, a); strcat(target, "/"); strcat(target, b); strcat(target, ")"); break;
-            case LOG:  strcat(target, "log("); strcat(target, a); strcat(target, ")"); break;
-            case SIN:  strcat(target, "sin("); strcat(target, a); strcat(target, ")"); break;
-            case EXP:  strcat(target, "exp("); strcat(target, a); strcat(target, ")"); break;
-            case POW:  strcat(target, "("); strcat(target, a); strcat(target, "^"); strcat(target, b); strcat(target, ")"); break;
-            default:   strcat(target, "NAN"); break;
+            case ZERO:  strcat(target, "0"); break;
+            case ONE:   strcat(target, "1");break;
+            case X:     strcat(target, "x");break;
+            case A:     strcat(target, a); break;
+            case B:     strcat(target, b); break;// need both since of how consts are passed in
+            case PLUS:  strcat(target, "("); strcat(target, a); strcat(target, "+"); strcat(target, b); strcat(target, ")"); break;
+            case MINUS: strcat(target, "("); strcat(target, a); strcat(target, "-"); strcat(target, b); strcat(target, ")"); break;
+            case RMINUS:strcat(target, "("); strcat(target, b); strcat(target, "-"); strcat(target, a); strcat(target, ")"); break;
+            case DIV:   strcat(target, "("); strcat(target, a); strcat(target, "/"); strcat(target, b); strcat(target, ")"); break;
+            case RDIV:  strcat(target, "("); strcat(target, b); strcat(target, "/"); strcat(target, a); strcat(target, ")"); break;
+            case LOG:   strcat(target, "log("); strcat(target, a); strcat(target, ")"); break;
+            case SIN:   strcat(target, "sin("); strcat(target, a); strcat(target, ")"); break;
+            case ASIN:  strcat(target, "asin("); strcat(target, a); strcat(target, ")"); break;
+            case ATAN:  strcat(target, "atan("); strcat(target, a); strcat(target, "/"); strcat(target, b); strcat(target, ")"); break;
+            case SQR:   strcat(target, "(("); strcat(target, a); strcat(target, ")^2)"); break;
+            case SQRT:  strcat(target, "sqrt("); strcat(target, a); strcat(target, ")"); break;
+            case EXP:   strcat(target, "exp("); strcat(target, a); strcat(target, ")"); break;
+            case POW:   strcat(target, "("); strcat(target, a); strcat(target, "^"); strcat(target, b); strcat(target, ")"); break;
+            default:    strcat(target, "NAN"); break;
         }    
 }
 
 char buf[PROGRAM_LENGTH][1000]; 
 char cbuf[100]; // for consts
+char cbuf2[100]; // for consts
 void displaystring(const char* const_format, int N, int idx, op* P, float* C, FILE* fp){
     // pass in the constant format so we can give "C" if we want to get the structure out
     
     for(int i=0;i<PROGRAM_LENGTH;i++) { strcpy(buf[i], ""); }
     
-    sprintf(cbuf, const_format, C[idx+0*N]);
-    string_dispatch(buf[0], P[idx+0*N], "x", cbuf);
-    sprintf(cbuf, const_format, C[idx+1*N]);
-    string_dispatch(buf[1], P[idx+1*N], "x", cbuf);
+    sprintf(cbuf, const_format, C[idx+0*N]); sprintf(cbuf2, const_format, C[idx+1*N]);
+    string_dispatch(buf[0], P[idx+0*N], cbuf, cbuf2);
+    sprintf(cbuf, const_format, C[idx+2*N]); sprintf(cbuf2, const_format, C[idx+3*N]);
+    string_dispatch(buf[1], P[idx+1*N], cbuf, cbuf2);
     string_dispatch(buf[2], P[idx+2*N], buf[0], buf[1]);
 
-    sprintf(cbuf, const_format, C[idx+2*N]);
-    string_dispatch(buf[3], P[idx+3*N], "x", cbuf);
-    sprintf(cbuf, const_format, C[idx+3*N]);
-    string_dispatch(buf[4], P[idx+4*N], "x", cbuf);
+    sprintf(cbuf, const_format, C[idx+4*N]); sprintf(cbuf2, const_format, C[idx+5*N]);
+    string_dispatch(buf[3], P[idx+3*N], cbuf, cbuf2);
+    sprintf(cbuf, const_format, C[idx+6*N]); sprintf(cbuf2, const_format, C[idx+7*N]);
+    string_dispatch(buf[4], P[idx+4*N], cbuf, cbuf2);
     string_dispatch(buf[5], P[idx+5*N], buf[3], buf[4]);
 
     string_dispatch(buf[6], P[idx+6*N], buf[2], buf[5]);
 
 
-    sprintf(cbuf, const_format, C[idx+4*N]);
-    string_dispatch(buf[7], P[idx+7*N], "x", cbuf);
-    sprintf(cbuf, const_format, C[idx+5*N]);
-    string_dispatch(buf[8], P[idx+8*N], "x", cbuf);
+    sprintf(cbuf, const_format, C[idx+8*N]); sprintf(cbuf2, const_format, C[idx+9*N]);
+    string_dispatch(buf[7], P[idx+7*N], cbuf, cbuf2);
+    sprintf(cbuf, const_format, C[idx+10*N]); sprintf(cbuf2, const_format, C[idx+11*N]);
+    string_dispatch(buf[8], P[idx+8*N], cbuf, cbuf2);
     string_dispatch(buf[9], P[idx+9*N], buf[7], buf[8]);
 
-    sprintf(cbuf, const_format, C[idx+6*N]);
-    string_dispatch(buf[10], P[idx+10*N], "x", cbuf);
-    sprintf(cbuf, const_format, C[idx+7*N]);
-    string_dispatch(buf[11], P[idx+11*N], "x", cbuf);
+    sprintf(cbuf, const_format, C[idx+12*N]); sprintf(cbuf2, const_format, C[idx+13*N]);
+    string_dispatch(buf[10], P[idx+10*N], cbuf, cbuf2);
+    sprintf(cbuf, const_format, C[idx+14*N]); sprintf(cbuf2, const_format, C[idx+15*N]);
+    string_dispatch(buf[11], P[idx+11*N], cbuf, cbuf2);
     string_dispatch(buf[12], P[idx+12*N], buf[10], buf[11]);
 
     string_dispatch(buf[13], P[idx+13*N], buf[9], buf[12]);
     
     string_dispatch(buf[14], P[idx+14*N], buf[6], buf[13]);
     
-     fprintf(fp, "%s", buf[14]);
+    fprintf(fp, "%s", buf[14]);
 }
 
 
@@ -410,7 +503,7 @@ int main(int argc, char** argv)
 {   
     
     /// default parameters
-    int N = 1000;
+    int N = 10000;
     int steps = 1000;
     int outer = 100;
     int seed = -1;
@@ -418,7 +511,7 @@ int main(int argc, char** argv)
     int WHICH_GPU = 0;
     int FIRST_HALF_DATA = 0;
     int EVEN_HALF_DATA = 0;
-    float resample_threshold = 50.0; // hypotheses more than this far from the MAP get resampled every outer block
+    float resample_threshold = 500.0; // hypotheses more than this far from the MAP get resampled every outer block
     string in_file_path = "data.txt";
     string out_path = "out/";
     
@@ -524,13 +617,13 @@ int main(int argc, char** argv)
     // -----------------------------------------------------------------------
     
     op*    host_P =   new op[N*PROGRAM_LENGTH];
-    float* host_C =  new float[N*PROGRAM_LENGTH];
+    float* host_C =  new float[N*NCONSTANTS];
     float* host_prior =  new float[N];
     float* host_likelihood =  new float[N]; 
     
    
     for(int i=0;i<PROGRAM_LENGTH*N;i++) host_P[i] = rand_lim(NOPS-1);
-    for(int i=0;i<NCONSTANTS*N;i++)     host_C[i] = random_normal();
+    for(int i=0;i<NCONSTANTS*N;i++)     host_C[i] = CONSTANT_SCALE*random_cauchy();
     
     
     // -----------------------------------------------------------------------
@@ -557,12 +650,11 @@ int main(int argc, char** argv)
         MH_simple_kernel<<<N_BLOCKS,BLOCK_SIZE>>>(N, device_P, device_C, device_D, ndata, steps, device_prior, device_likelihood, rand());
     
         // copy memory back 
-        cudaMemcpy(host_P, device_P, N*sizeof(op)*PROGRAM_LENGTH, cudaMemcpyDeviceToHost);
-        cudaMemcpy(host_C, device_C, N*sizeof(float)*NCONSTANTS, cudaMemcpyDeviceToHost);
-        cudaMemcpy(host_prior, device_prior, N*sizeof(float), cudaMemcpyDeviceToHost);
-        cudaMemcpy(host_likelihood, device_likelihood, N*sizeof(float), cudaMemcpyDeviceToHost);
+        cudaMemcpy(host_P, device_P, N*sizeof(op)*PROGRAM_LENGTH, cudaMemcpyDeviceToHost); CUDA_CHECK();
+        cudaMemcpy(host_C, device_C, N*sizeof(float)*NCONSTANTS, cudaMemcpyDeviceToHost); CUDA_CHECK();
+        cudaMemcpy(host_prior, device_prior, N*sizeof(float), cudaMemcpyDeviceToHost); CUDA_CHECK();
+        cudaMemcpy(host_likelihood, device_likelihood, N*sizeof(float), cudaMemcpyDeviceToHost); CUDA_CHECK();
         cudaDeviceSynchronize(); // wait for preceedings requests to finish
-        if(cudaGetLastError() != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(cudaGetLastError())); }   
         
         // and now print
         fp = fopen(SAMPLE_PATH.c_str(), "a");
@@ -570,24 +662,25 @@ int main(int argc, char** argv)
 	    fprintf(fp, "%d\t%d\t", h, o);
 	    
             fprintf(fp, "%.4f\t%4.f\t%.4f\t", host_prior[h]+host_likelihood[h], host_prior[h], host_likelihood[h]);
-            
-            for(int c=0;c<NCONSTANTS;c++){ 
-                fprintf(fp, "%.2f ", host_C[h+N*c]);
-            }
-            fprintf(fp, "\t\"");
              
 //             for(int c=0;c<PROGRAM_LENGTH;c++){ 
 //                 fprintf(fp, "%d ", host_P[h+N*c]);
 //             }
 //             fprintf(fp, "\t\"");
-            
+
+            fprintf(fp, "\"");
             displaystring("C", N, h, host_P, host_C, fp);
             
-            fprintf(fp, "\t\"");
+            fprintf(fp, "\"\t\"");
             
             displaystring("%.4f", N, h, host_P, host_C, fp);
-
-            fprintf(fp, "\"\n");
+            fprintf(fp, "\"\t");
+            
+            for(int c=0;c<NCONSTANTS;c++){ 
+                fprintf(fp, "%.2f\t", host_C[h+N*c]);
+            }
+            
+            fprintf(fp, "\n");
             
         }
         fclose(fp);
@@ -604,12 +697,12 @@ int main(int argc, char** argv)
             if(host_prior[h]+host_likelihood[h] < map_so_far - resample_threshold) {
                 // randomize
                 for(int i=0;i<PROGRAM_LENGTH;i++) host_P[h+i*N] = rand_lim(NOPS-1);
-                for(int i=0;i<NCONSTANTS;i++)     host_C[h+i*N] = random_normal();
+                for(int i=0;i<NCONSTANTS;i++)     host_C[h+i*N] = CONSTANT_SCALE*random_cauchy();
             }
         }
         // and copy back 
-        cudaMemcpy(device_P, host_P, N*PROGRAM_LENGTH*sizeof(op), cudaMemcpyHostToDevice);
-        cudaMemcpy(device_C, host_C, N*NCONSTANTS*sizeof(float), cudaMemcpyHostToDevice);
+        cudaMemcpy(device_P, host_P, N*PROGRAM_LENGTH*sizeof(op), cudaMemcpyHostToDevice);  CUDA_CHECK();
+        cudaMemcpy(device_C, host_C, N*NCONSTANTS*sizeof(float), cudaMemcpyHostToDevice);  CUDA_CHECK();
     }
         
         
