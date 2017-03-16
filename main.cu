@@ -44,7 +44,7 @@ typedef struct datum {
     float sd; // stdev of the output|input. 
 } datum;
 
-enum OPS { ZERO, ONE, X, A, B, PLUS, MINUS, RMINUS, DIV, RDIV, LOG, EXP, POW, SQRT, SIN, ASIN, ATAN, NOPS};
+enum OPS { ZERO, ONE, X, A, B, PLUS, MINUS, RMINUS, TIMES, DIV, RDIV, LOG, EXP, POW, RPOW, SQRT, SIN, ASIN, ATAN, GAMMA, BESSEL, NOPS};
 const int SQR = -99;
 
 
@@ -209,16 +209,17 @@ vector<datum>* load_data_file(const char* datapath, int FIRST_HALF_DATA, int EVE
 // evaluat a single operation op on arguments a and b
 __device__ float dispatch(op o, float x, float a, float b) {
         switch(o) {
-            case ZERO:   return 0.0;
-            case ONE:    return 1.0;
+            case ZERO:   return 0.0f;
+            case ONE:    return 1.0f;
             case X:      return x;
             case A:      return a; 
             case B:      return b; // need both since of how consts are passed in
             case PLUS:   return a+b;
             case MINUS:  return a-b;
             case RMINUS: return b-a;
-            case DIV:    return a/b;
-            case RDIV:   return b/a;
+            case TIMES:  return a*b;
+            case DIV:    return fdividef(a,b);
+            case RDIV:   return fdividef(b,a);
             case SQRT:   return sqrtf(a);
             case SQR:    return a*a;
             case LOG:    return logf(a);
@@ -227,6 +228,9 @@ __device__ float dispatch(op o, float x, float a, float b) {
             case ATAN:   return atanf(a/b);
             case EXP:    return expf(a);
             case POW:    return powf(a,b);
+            case RPOW:   return powf(b,a);
+            case GAMMA:  return tgammaf(a);
+            case BESSEL: return j0f(a);
             default:     return CUDART_NAN_F;
         }    
 }
@@ -272,27 +276,34 @@ __device__ float compute_likelihood(int N, int idx, op* P, float* C, datum* D, i
 __device__ float prior_dispatch(op o, float a, float b) {
     // count up the length for the prior
         switch(o) {
-            case ZERO: return 0.0;
-            case ONE:  return 0.0;
-            case X:    return 0.0;
-            case A:    return a; 
-            case B:    return b; // need both since of how consts are passed in
-            case PLUS: return 1+a+b;
-            case MINUS: return 1+a+b;
+            case ZERO:   return 0.0;
+            case ONE:    return 0.0;
+            case X:      return 0.0;
+            case A:      return a; 
+            case B:      return b; // need both since of how consts are passed in
+            case PLUS:   return 1+a+b;
+            case MINUS:  return 1+a+b;
             case RMINUS: return 1+b+a;
-            case DIV:   return 1+a+b;
+            case TIMES:  return 1+a+b;
+            case DIV:    return 1+a+b;
             case RDIV:   return 1+a+b;
-            case SQRT:  return 1+a;
-            case SQR:   return 1+a;
-            case LOG:   return 1+a;
-            case SIN:   return 1+a;
+            case SQRT:   return 1+a;
+            case SQR:    return 1+a;
+            case LOG:    return 1+a;
+            case SIN:    return 1+a;
             case ASIN:   return 1+a;
             case ATAN:   return 1+a+b;
-            case EXP:   return 1+a;
-            case POW:   return 1+a+b;
-            default:    return CUDART_NAN_F;
+            case EXP:    return 1+a;
+            case POW:    return 1+a+b;
+            case RPOW:   return 1+b+a;
+            case GAMMA:  return 1+a;
+            case BESSEL: return 1+a;
+            default:     return CUDART_NAN_F;
         }    
 }
+
+
+
 
 __device__ float compute_prior(int N, int idx, op* P, float* C) {
     // compute the prior
@@ -349,10 +360,14 @@ __global__ void MH_simple_kernel(int N, op* P, float* C, datum* D, int ndata, in
     // int rx = random_seed;     
 	int rx = random_seed + idx; // NOTE: We might want to call cuda_rand here once so that we don't have a bias from low seeds
     
+    
+    
 	for(int mcmci=0;mcmci<steps;mcmci++) {
         
 	    if(mcmci & 0x1 == 0x1) { // propose to a structure every this often
                 
+//                 int who_propose = random_int( 1<<PROGRAM_LENGTH, RNG_ARGS); // a bit for whether we propose to each part of structure
+        
                 int i = idx + N*random_int(PROGRAM_LENGTH, RNG_ARGS);
                 op old = P[i];
                 P[i] = random_int(NOPS, RNG_ARGS);
@@ -418,6 +433,7 @@ void string_dispatch( char* target, op o, const char* a, const char* b) {
             case PLUS:  strcat(target, "("); strcat(target, a); strcat(target, "+"); strcat(target, b); strcat(target, ")"); break;
             case MINUS: strcat(target, "("); strcat(target, a); strcat(target, "-"); strcat(target, b); strcat(target, ")"); break;
             case RMINUS:strcat(target, "("); strcat(target, b); strcat(target, "-"); strcat(target, a); strcat(target, ")"); break;
+            case TIMES: strcat(target, "("); strcat(target, b); strcat(target, "*"); strcat(target, a); strcat(target, ")"); break;
             case DIV:   strcat(target, "("); strcat(target, a); strcat(target, "/"); strcat(target, b); strcat(target, ")"); break;
             case RDIV:  strcat(target, "("); strcat(target, b); strcat(target, "/"); strcat(target, a); strcat(target, ")"); break;
             case LOG:   strcat(target, "log("); strcat(target, a); strcat(target, ")"); break;
@@ -428,6 +444,9 @@ void string_dispatch( char* target, op o, const char* a, const char* b) {
             case SQRT:  strcat(target, "sqrt("); strcat(target, a); strcat(target, ")"); break;
             case EXP:   strcat(target, "exp("); strcat(target, a); strcat(target, ")"); break;
             case POW:   strcat(target, "("); strcat(target, a); strcat(target, "^"); strcat(target, b); strcat(target, ")"); break;
+            case RPOW:  strcat(target, "("); strcat(target, b); strcat(target, "^"); strcat(target, a); strcat(target, ")"); break;
+            case GAMMA: strcat(target, "gamma("); strcat(target,a); strcat(target, ")"); break;
+            case BESSEL:strcat(target, "besselJ("); strcat(target, a); strcat(target, ",0)"); break;
             default:    strcat(target, "NAN"); break;
         }    
 }
@@ -661,7 +680,7 @@ int main(int argc, char** argv)
         for(int h=0;h<N;h++) {
 	    fprintf(fp, "%d\t%d\t", h, o);
 	    
-            fprintf(fp, "%.4f\t%4.f\t%.4f\t", host_prior[h]+host_likelihood[h], host_prior[h], host_likelihood[h]);
+            fprintf(fp, "%.4f\t%.4f\t%.4f\t", host_prior[h]+host_likelihood[h], host_prior[h], host_likelihood[h]);
              
 //             for(int c=0;c<PROGRAM_LENGTH;c++){ 
 //                 fprintf(fp, "%d ", host_P[h+N*c]);
