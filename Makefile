@@ -7,7 +7,6 @@ CUDA_LIB=/usr/local/cuda-$(CUDA_VERSION)/lib64
 
 # NOTE: These options can be read off by running nvidia's (copyrighted) Makefile on some test examples
 NVCC_FLAGS=-m64 -gencode arch=compute_30,code=sm_30 -use_fast_math
-# -use_fast_math forces everything to compile to __exp(x) versions, instead of slower and more accurate exp(x) versions...
 
 all:
 	nvcc $(NVCC_FLAGS) -I$(CUDA_INCLUDE) -I. -I$(CUDA_SAMPLES_INCLUDE) -o main.o -c main.cu

@@ -2,7 +2,7 @@
 library(Hmisc)
 library(scales) # for adding alpha 
 
-DIRECTORY="out/data-sources/Science/BarometricFormula/"
+DIRECTORY="out/data-sources/NIST/BoxBOD/"
 # DIRECTORY="out/data-sources/Science/Hubble/"
 # DIRECTORY="run/data-sources/Science/Galileo-/"
 # DIRECTORY="run/data-sources/Science/Fibonacci-/"
@@ -10,7 +10,7 @@ DIRECTORY="out/data-sources/Science/BarometricFormula/"
 # DIRECTORY="run/data-sources/Regression/60_100-/"
 
 d <- read.table(paste(DIRECTORY, "tops.txt", sep="/"), sep="\t")
-# d <- read.table(paste(DIRECTORY, "samples.txt", sep="/"), sep="\t")
+#d <- read.table(paste(DIRECTORY, "samples.txt", sep="/"), sep="\t")
 names(d) <- c("thread", "outer", "posterior", "prior", "likelihood", "h.struct", "h")
 
 
