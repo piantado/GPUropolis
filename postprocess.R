@@ -2,25 +2,25 @@
 library(Hmisc)
 library(scales) # for adding alpha 
 
-DIRECTORY="out/data-sources/NIST/BoxBOD/"
-# DIRECTORY="out/data-sources/Science/Hubble/"
+
+# DIRECTORY="out/data-sources/NIST/Bennett5/"
+DIRECTORY="out/data-sources/Science/CLT/"
 # DIRECTORY="run/data-sources/Science/Galileo-/"
 # DIRECTORY="run/data-sources/Science/Fibonacci-/"
-# DIRECTORY="run/"
+# DIRECTORY="out/"
 # DIRECTORY="run/data-sources/Regression/60_100-/"
 
 d <- read.table(paste(DIRECTORY, "tops.txt", sep="/"), sep="\t")
-#d <- read.table(paste(DIRECTORY, "samples.txt", sep="/"), sep="\t")
+# d <- read.table(paste(DIRECTORY, "samples.txt", sep="/"), sep="\t")
 names(d) <- c("thread", "outer", "posterior", "prior", "likelihood", "h.struct", "h")
 
 
-CUTOFF=4
-
+CUTOFF=50
 
 data <- read.table(paste(DIRECTORY, "data.txt", sep="/"))
 
 
-x <- seq(min(data$V1), max(data$V1), length.out=3000)
+x <- seq(min(data$V1), max(data$V1), length.out=1000)
 
 ## Plot the data
 # bitmap("output.png", height=6, width=6, res=400)
@@ -38,8 +38,8 @@ for(r in 1:nrow(dplot)) {
         y <- rep(y, length(x))
     }
     
-    
-    lines(x,y, color=rgb(0,0,0,alpha=0.5))
+    lines(x,y)
+#     lines(x,y, color=rgb(0,0,0,alpha=0.5))
     
 #     readline()
                       

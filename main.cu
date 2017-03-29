@@ -3,9 +3,11 @@
  *
  * Simple tree-regeneration on CUDA with coalesced memory access
  * 
- * TOOD: Try copying in the kernel into shared memory
- *       Can always scale x and output
+
+    This version uses constants at the bottom of the tree, instead of a constant at each 
+    program position that is potentially available to a constant-op 
  */
+
 
 #include <stdio.h>
 #include <time.h>
@@ -16,18 +18,18 @@
 #include <getopt.h>
 #include <string.h>
 #include <vector>
-#include "math_constants.h" // Needed to define CUDART_NAN_F
+#include "math_constants.h" // Needed to define CUDART_NAN_F, CUDART_INF_F
 
 using namespace std;
 
-const float PRIOR_MULTIPLIER = 10.0; 
-const float CONST_PRIOR = 1.0; // how much prior do we pay per constant used?
+const float PRIOR_MULTIPLIER = 1.0; 
+const float CONST_LENGTH_PRIOR = 1.0; // how mcuh do constants cost in terms of length?
+const float X_LENGTH_PRIOR = 1.0; // how mcuh does X cost in terms of length?
 
 const int PROGRAM_LENGTH = 15;
-const int NCONSTANTS     = 16;
+const int NCONSTANTS     = 15; // these must be equal in this version -- one constant for each program slot; although note the low ones are never used, right?
 
-const int CONSTANT_SCALE = 10.0; // Maybe set to be the SD of the y values, fucntions as a scale over the constants in teh prior, proprosals
-
+const float CONSTANT_SCALE = 10.0; // Maybe set to be the SD of the y values, fucntions as a scale over the constants in teh prior, proprosals
 
 // Setup for gpu hardware 
 const int BLOCK_SIZE = 128;
@@ -44,8 +46,9 @@ typedef struct datum {
     float sd; // stdev of the output|input. 
 } datum;
 
-enum OPS { ZERO, ONE, X, A, B, PLUS, MINUS, RMINUS, TIMES, DIV, RDIV, LOG, EXP, POW, RPOW, SQRT, SIN, ASIN, ATAN, GAMMA, BESSEL, NOPS};
-const int SQR = -99;
+enum OPS { ONE, A, B, PLUS, MINUS, RMINUS, CPLUS, TIMES, CTIMES, DIV, RDIV, LOG, EXP, POW, CPOW, RPOW, CRPOW, SQRT, SIN, ASIN, ATAN, GAMMA, BESSEL, ABS,     NOPS};
+const int SQR = -99; // if we want to remove some from OPS, use here so the code below doesn't break
+const char* PROGRAM_CODE = "1ab+-_#*@/|le^pVPRsATGB%A"; // if we want to print a concise description of the program (mainly for debugging) These MUST be algined with OPS
 
 
 // -----------------------------------------------------------------------
@@ -75,7 +78,6 @@ const int SQR = -99;
 #define is_invalid(x) (!is_valid(x))
 
 #define PIf 3.141592653589 
-#define BAD_LOGP (-9e99)
  
 #define RNG_DEF int& rx
 #define RNG_ARGS rx
@@ -108,13 +110,13 @@ __device__ __host__ float random_float(RNG_DEF) {
 __device__ float random_normal(RNG_DEF) {
     float u = random_float(RNG_ARGS);
     float v = random_float(RNG_ARGS);
-    return sqrtf(-2.0*logf(u)) * sinf(2*PIf*v);
+    return sqrtf(-2.0*logf(u)) * sinf(2.0*PIf*v);
 }
 
 float random_normal() {
     float u = float(rand())/RAND_MAX;
     float v = float(rand())/RAND_MAX;
-    return sqrtf(-2.0*log(u)) * sin(2*PIf*v);
+    return sqrtf(-2.0*log(u)) * sin(2.0*PIf*v);
 }
 
 __device__ float random_cauchy(RNG_DEF) {
@@ -199,25 +201,23 @@ vector<datum>* load_data_file(const char* datapath, int FIRST_HALF_DATA, int EVE
 	return d;
 }
 
-
-// -----------------------------------------------------------------------
-// Running programs
-// -----------------------------------------------------------------------     
-    
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Run programs
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////
    
 // TODO: Make inline
 // evaluat a single operation op on arguments a and b
-__device__ float dispatch(op o, float x, float a, float b) {
+__device__ float dispatch(op o, float x, float a, float b, float C) {
         switch(o) {
-            case ZERO:   return 0.0f;
-            case ONE:    return 1.0f;
-            case X:      return x;
+            case ONE:    return 1.0;
             case A:      return a; 
             case B:      return b; // need both since of how consts are passed in
             case PLUS:   return a+b;
+            case CPLUS:  return a+C;
             case MINUS:  return a-b;
             case RMINUS: return b-a;
             case TIMES:  return a*b;
+            case CTIMES: return C*a;
             case DIV:    return fdividef(a,b);
             case RDIV:   return fdividef(b,a);
             case SQRT:   return sqrtf(a);
@@ -228,44 +228,42 @@ __device__ float dispatch(op o, float x, float a, float b) {
             case ATAN:   return atanf(a/b);
             case EXP:    return expf(a);
             case POW:    return powf(a,b);
+            case CPOW:   return powf(a,C);
             case RPOW:   return powf(b,a);
+            case CRPOW:  return powf(b,C);
             case GAMMA:  return tgammaf(a);
             case BESSEL: return j0f(a);
+            case ABS:    return fabsf(a);
             default:     return CUDART_NAN_F;
         }    
 }
 
 __device__ float call(int N, int idx, op* P, float* C, float x) {
-    float f0 = dispatch(P[idx+0*N], x, C[idx+0*N], C[idx+1*N]);
-    float f1 = dispatch(P[idx+1*N], x, C[idx+2*N], C[idx+3*N]);
-    float f2 = dispatch(P[idx+2*N], x, f0, f1);
+    // start at the first non-leaves
+    float buf[PROGRAM_LENGTH+1]; // we'll waste one space here at the beginning to simplify everything else
     
-    float f3 = dispatch(P[idx+3*N], x, C[idx+4*N], C[idx+5*N]);
-    float f4 = dispatch(P[idx+4*N], x, C[idx+6*N], C[idx+7*N]);
-    float f5 = dispatch(P[idx+5*N], x, f3, f4);
+    for(int i=PROGRAM_LENGTH;i>=1;i--) { // start at the last node
+        int lidx = 2*i; // indices of the children
+        int ridx = 2*i+1;
+        
+        if(lidx > PROGRAM_LENGTH) buf[i] = x; // the default value at the base of the tree
+        else                      buf[i] = dispatch(P[idx+(i-1)*N], x, buf[lidx], buf[ridx], C[idx+(i-1)*N]); // P[...-1] since P is zero-indexed
+    }
+    // now buf[1] stores the output, which is the top node
     
-    float f6 = dispatch(P[idx+6*N], x, f2, f5);
-    
-    
-    float f7 = dispatch(P[idx+7*N], x, C[idx+8*N], C[idx+9*N]);
-    float f8 = dispatch(P[idx+8*N], x, C[idx+10*N], C[idx+11*N]);
-    float f9 = dispatch(P[idx+9*N], x, f7, f8);
-    
-    float f10 = dispatch(P[idx+10*N], x, C[idx+12*N], C[idx+13*N]);
-    float f11 = dispatch(P[idx+11*N], x, C[idx+14*N], C[idx+15*N]);
-    float f12 = dispatch(P[idx+12*N], x, f10, f11);
-    
-    float f13 = dispatch(P[idx+13*N], x, f9, f12);
-    
-    return dispatch(P[idx+14*N], x, f6, f13);
+    return buf[1];
 }
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Compute the likelihood
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 __device__ float compute_likelihood(int N, int idx, op* P, float* C, datum* D, int ndata) {
     float ll = 0.0; // total ll 
     for(int di=0;di<ndata;di++) {
         float fx = call(N, idx, P, C, D[di].x);
 	
-	if(is_invalid(fx)) return BAD_LOGP;
+        if(is_invalid(fx)) return -CUDART_INF_F;
 	  
         ll += lnormalpdf(fx-D[di].y, D[di].sd);
     }
@@ -273,18 +271,22 @@ __device__ float compute_likelihood(int N, int idx, op* P, float* C, datum* D, i
     
 }
 
-__device__ float prior_dispatch(op o, float a, float b) {
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Compute the prior
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+__device__ float dispatch_length(op o, float a, float b) {
     // count up the length for the prior
         switch(o) {
-            case ZERO:   return 0.0;
-            case ONE:    return 0.0;
-            case X:      return 0.0;
+            case ONE:    return 1;
             case A:      return a; 
             case B:      return b; // need both since of how consts are passed in
             case PLUS:   return 1+a+b;
+            case CPLUS:  return CONST_LENGTH_PRIOR+a;
             case MINUS:  return 1+a+b;
             case RMINUS: return 1+b+a;
             case TIMES:  return 1+a+b;
+            case CTIMES: return CONST_LENGTH_PRIOR+a;
             case DIV:    return 1+a+b;
             case RDIV:   return 1+a+b;
             case SQRT:   return 1+a;
@@ -295,9 +297,12 @@ __device__ float prior_dispatch(op o, float a, float b) {
             case ATAN:   return 1+a+b;
             case EXP:    return 1+a;
             case POW:    return 1+a+b;
+            case CPOW:   return CONST_LENGTH_PRIOR+a;
             case RPOW:   return 1+b+a;
+            case CRPOW:  return CONST_LENGTH_PRIOR+a;
             case GAMMA:  return 1+a;
             case BESSEL: return 1+a;
+            case ABS:    return 1+a;
             default:     return CUDART_NAN_F;
         }    
 }
@@ -306,32 +311,22 @@ __device__ float prior_dispatch(op o, float a, float b) {
 
 
 __device__ float compute_prior(int N, int idx, op* P, float* C) {
-    // compute the prior
     
-    int l0 = prior_dispatch(P[idx+0*N], CONST_PRIOR, CONST_PRIOR);
-    int l1 = prior_dispatch(P[idx+1*N], CONST_PRIOR, CONST_PRIOR);
-    int l2 = prior_dispatch(P[idx+2*N], l0, l1);
+    float len[PROGRAM_LENGTH+1]; // how long is the tree below? 
     
-    int l3 = prior_dispatch(P[idx+3*N], CONST_PRIOR, CONST_PRIOR);
-    int l4 = prior_dispatch(P[idx+4*N], CONST_PRIOR, CONST_PRIOR);
-    int l5 = prior_dispatch(P[idx+5*N], l3, l4);
-    
-    int l6 = prior_dispatch(P[idx+6*N], l2, l5);
-    
-    
-    int l7 = prior_dispatch(P[idx+7*N], CONST_PRIOR, CONST_PRIOR);
-    int l8 = prior_dispatch(P[idx+8*N], CONST_PRIOR, CONST_PRIOR);
-    int l9 = prior_dispatch(P[idx+9*N], l7, l8);
-    
-    int l10 = prior_dispatch(P[idx+10*N], CONST_PRIOR, CONST_PRIOR);
-    int l11 = prior_dispatch(P[idx+11*N], CONST_PRIOR, CONST_PRIOR);
-    int l12 = prior_dispatch(P[idx+12*N], l10, l11);
-    
-    int l13 = prior_dispatch(P[idx+13*N], l9, l12);
-    
-    int len = prior_dispatch(P[idx+14*N], l6, l13);
-    
-    float prior = -PRIOR_MULTIPLIER * len;
+    for(int i=PROGRAM_LENGTH;i>=1;i--) { // start at the last node
+        int lidx = 2*i; // indices of the children
+        int ridx = 2*i+1;
+        
+        op o = P[idx+(i-1)*N];
+        
+        if(lidx>PROGRAM_LENGTH) len[i] = X_LENGTH_PRIOR; // x has length 1
+        else                    len[i] = dispatch_length(o, len[lidx], len[ridx]);
+        
+
+    }
+      
+    float prior = -PRIOR_MULTIPLIER * len[1]; // the total length at the top
 
     for(int c=0;c<NCONSTANTS;c++) {
         prior += lcauchypdf(C[idx+c*N], CONSTANT_SCALE); // proportional to cauchy density
@@ -344,6 +339,25 @@ __device__ float compute_prior(int N, int idx, op* P, float* C) {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // MCMC Kernel
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+__device__ int is_descendant(int n, int k) {
+    // this takes n,k as 0-indexed, but for the computation below we need them to be 1-indexed (I think?)
+    
+    if(k==n) return 1;
+  
+    // translate to 1-indexed
+    n = n+1;
+    k = k+1;
+    
+    // now we check if you're a descendant by whether or not a sequence of lambda x: 2x or lambda x:2x+1 will ever transform
+    // k into n. This is the same as checking if k can be shifted over to be n
+    while(k>n) {
+        k = k >> 1; // shift once
+        if(k == n) return 1;
+    }
+    
+    return 0;
+}
 
 __global__ void MH_simple_kernel(int N, op* P, float* C, datum* D, int ndata, int steps, float* prior, float* likelihood, int random_seed)
 {
@@ -360,17 +374,30 @@ __global__ void MH_simple_kernel(int N, op* P, float* C, datum* D, int ndata, in
     // int rx = random_seed;     
 	int rx = random_seed + idx; // NOTE: We might want to call cuda_rand here once so that we don't have a bias from low seeds
     
-    
+    op old_program[PROGRAM_LENGTH]; // store a buffer for the old program
     
 	for(int mcmci=0;mcmci<steps;mcmci++) {
         
-	    if(mcmci & 0x1 == 0x1) { // propose to a structure every this often
+	    if( (mcmci & 0x1) == 0x1) { // propose to a structure every this often
+                int n;//0-indexed 
                 
-//                 int who_propose = random_int( 1<<PROGRAM_LENGTH, RNG_ARGS); // a bit for whether we propose to each part of structure
-        
-                int i = idx + N*random_int(PROGRAM_LENGTH, RNG_ARGS);
-                op old = P[i];
-                P[i] = random_int(NOPS, RNG_ARGS);
+                if(current > -CUDART_INF_F){
+                    n = random_int(PROGRAM_LENGTH, RNG_ARGS); // pick a node to propose to, note that here 1 is the root (by tree logic)
+                } else {
+                    n = 0; // always propose to the root if we're terrible
+                }
+                                
+                for(int i=n;i<PROGRAM_LENGTH;i++) {
+                    
+                    old_program[i] = P[idx+i*N]; // copy over
+                    
+//                     now make a proposal to every descendant of n
+                    if(is_descendant(n,i)) { // translate i into 1-based indexing used for binary tree encoding.
+                        P[i] = random_int(NOPS, RNG_ARGS);
+                        // TODO: ADD If there is a constant below, propose from the prior?
+                    }
+                    
+                }
                 
                 float proposal_prior = compute_prior(N, idx, P, C);
                 float proposal_likelihood = compute_likelihood(N, idx, P, C, D, ndata);
@@ -381,20 +408,27 @@ __global__ void MH_simple_kernel(int N, op* P, float* C, datum* D, int ndata, in
                     current_likelihood = proposal_likelihood;
                     current_prior = proposal_prior;
                 } else {
-                    P[i] = old; // restore the old version
+                    
+                    // restore 
+                    for(int i=n;i<PROGRAM_LENGTH;i++) { // TODO: Could be started at n?
+                        P[idx+i*N] = old_program[i]; 
+                    }
                 }
 
 		
-	    } else { // propose to a constant otherwise
+	    } 
+        else { // propose to a constant otherwise
                 
                 int i = idx + N*random_int(NCONSTANTS, RNG_ARGS);
                 float old = C[i];
-    //              C[i] = C[i] + random_normal(RNG_ARGS); 
-                C[i] = C[i] + CONSTANT_SCALE*random_cauchy(RNG_ARGS); 
-    //             if(random_int(2,RNG_ARGS) == 1)
-    //                 C[i] = C[i] * (1.0+0.1*random_normal(RNG_ARGS)); 
-    //             else
-    //                 C[i] = C[i] / (1.0+0.1*random_normal(RNG_ARGS)); 
+                
+                // choose what kind of proposal
+                if(random_int(2,RNG_ARGS) == 0){
+                    C[i] = C[i] + CONSTANT_SCALE*random_normal(RNG_ARGS); 
+                } else {
+                    C[i] = C[i] + CONSTANT_SCALE*random_cauchy(RNG_ARGS); 
+                }
+                // TODO: Maybe make proposals relative to the size of the constant?
                 
                 float proposal_prior = compute_prior(N, idx, P, C);
                 float proposal_likelihood = compute_likelihood(N, idx, P, C, D, ndata);
@@ -410,7 +444,7 @@ __global__ void MH_simple_kernel(int N, op* P, float* C, datum* D, int ndata, in
                 
 		
 	    }
-          
+//           
       } // end mcmc loop
 	
     prior[idx] = current_prior; 
@@ -423,17 +457,17 @@ __global__ void MH_simple_kernel(int N, op* P, float* C, datum* D, int ndata, in
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // Output hypothesis
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-void string_dispatch( char* target, op o, const char* a, const char* b) {
+void string_dispatch( char* target, op o, const char* a, const char* b, const char* C) {
         switch(o) {
-            case ZERO:  strcat(target, "0"); break;
-            case ONE:   strcat(target, "1");break;
-            case X:     strcat(target, "x");break;
+            case ONE:   strcat(target, "1"); break;
             case A:     strcat(target, a); break;
             case B:     strcat(target, b); break;// need both since of how consts are passed in
             case PLUS:  strcat(target, "("); strcat(target, a); strcat(target, "+"); strcat(target, b); strcat(target, ")"); break;
+            case CPLUS:  strcat(target, "("); strcat(target, a); strcat(target, "+"); strcat(target, C); strcat(target, ")"); break;
             case MINUS: strcat(target, "("); strcat(target, a); strcat(target, "-"); strcat(target, b); strcat(target, ")"); break;
             case RMINUS:strcat(target, "("); strcat(target, b); strcat(target, "-"); strcat(target, a); strcat(target, ")"); break;
             case TIMES: strcat(target, "("); strcat(target, b); strcat(target, "*"); strcat(target, a); strcat(target, ")"); break;
+            case CTIMES: strcat(target, "("); strcat(target, b); strcat(target, "*"); strcat(target, C); strcat(target, ")"); break;
             case DIV:   strcat(target, "("); strcat(target, a); strcat(target, "/"); strcat(target, b); strcat(target, ")"); break;
             case RDIV:  strcat(target, "("); strcat(target, b); strcat(target, "/"); strcat(target, a); strcat(target, ")"); break;
             case LOG:   strcat(target, "log("); strcat(target, a); strcat(target, ")"); break;
@@ -444,53 +478,35 @@ void string_dispatch( char* target, op o, const char* a, const char* b) {
             case SQRT:  strcat(target, "sqrt("); strcat(target, a); strcat(target, ")"); break;
             case EXP:   strcat(target, "exp("); strcat(target, a); strcat(target, ")"); break;
             case POW:   strcat(target, "("); strcat(target, a); strcat(target, "^"); strcat(target, b); strcat(target, ")"); break;
+            case CPOW:  strcat(target, "("); strcat(target, a); strcat(target, "^"); strcat(target, C); strcat(target, ")"); break;
             case RPOW:  strcat(target, "("); strcat(target, b); strcat(target, "^"); strcat(target, a); strcat(target, ")"); break;
+            case CRPOW: strcat(target, "("); strcat(target, b); strcat(target, "^"); strcat(target, C); strcat(target, ")"); break;
             case GAMMA: strcat(target, "gamma("); strcat(target,a); strcat(target, ")"); break;
             case BESSEL:strcat(target, "besselJ("); strcat(target, a); strcat(target, ",0)"); break;
+            case ABS:   strcat(target, "abs("); strcat(target, a); strcat(target, ")"); break;
             default:    strcat(target, "NAN"); break;
         }    
 }
 
-char buf[PROGRAM_LENGTH][1000]; 
-char cbuf[100]; // for consts
-char cbuf2[100]; // for consts
+char buf[PROGRAM_LENGTH+1][1000]; 
+char cbuf[100];
 void displaystring(const char* const_format, int N, int idx, op* P, float* C, FILE* fp){
-    // pass in the constant format so we can give "C" if we want to get the structure out
-    
-    for(int i=0;i<PROGRAM_LENGTH;i++) { strcpy(buf[i], ""); }
-    
-    sprintf(cbuf, const_format, C[idx+0*N]); sprintf(cbuf2, const_format, C[idx+1*N]);
-    string_dispatch(buf[0], P[idx+0*N], cbuf, cbuf2);
-    sprintf(cbuf, const_format, C[idx+2*N]); sprintf(cbuf2, const_format, C[idx+3*N]);
-    string_dispatch(buf[1], P[idx+1*N], cbuf, cbuf2);
-    string_dispatch(buf[2], P[idx+2*N], buf[0], buf[1]);
 
-    sprintf(cbuf, const_format, C[idx+4*N]); sprintf(cbuf2, const_format, C[idx+5*N]);
-    string_dispatch(buf[3], P[idx+3*N], cbuf, cbuf2);
-    sprintf(cbuf, const_format, C[idx+6*N]); sprintf(cbuf2, const_format, C[idx+7*N]);
-    string_dispatch(buf[4], P[idx+4*N], cbuf, cbuf2);
-    string_dispatch(buf[5], P[idx+5*N], buf[3], buf[4]);
+    for(int i=PROGRAM_LENGTH;i>=1;i--) { // start at the last node
+        int lidx = 2*i; // indices of the children
+        int ridx = 2*i+1;
 
-    string_dispatch(buf[6], P[idx+6*N], buf[2], buf[5]);
+        strcpy(buf[i],""); // must zero since dispatch appends. 
 
-
-    sprintf(cbuf, const_format, C[idx+8*N]); sprintf(cbuf2, const_format, C[idx+9*N]);
-    string_dispatch(buf[7], P[idx+7*N], cbuf, cbuf2);
-    sprintf(cbuf, const_format, C[idx+10*N]); sprintf(cbuf2, const_format, C[idx+11*N]);
-    string_dispatch(buf[8], P[idx+8*N], cbuf, cbuf2);
-    string_dispatch(buf[9], P[idx+9*N], buf[7], buf[8]);
-
-    sprintf(cbuf, const_format, C[idx+12*N]); sprintf(cbuf2, const_format, C[idx+13*N]);
-    string_dispatch(buf[10], P[idx+10*N], cbuf, cbuf2);
-    sprintf(cbuf, const_format, C[idx+14*N]); sprintf(cbuf2, const_format, C[idx+15*N]);
-    string_dispatch(buf[11], P[idx+11*N], cbuf, cbuf2);
-    string_dispatch(buf[12], P[idx+12*N], buf[10], buf[11]);
-
-    string_dispatch(buf[13], P[idx+13*N], buf[9], buf[12]);
-    
-    string_dispatch(buf[14], P[idx+14*N], buf[6], buf[13]);
-    
-    fprintf(fp, "%s", buf[14]);
+        if(lidx>PROGRAM_LENGTH){
+            strcpy(buf[i],"x"); 
+        }
+        else {
+            sprintf(cbuf, const_format, C[idx+(i-1)*N]); // in case we need it
+            string_dispatch(buf[i], P[idx+(i-1)*N], buf[lidx], buf[ridx], cbuf);
+        }
+    }
+    fprintf(fp, "%s", buf[1]);
 }
 
 
@@ -530,7 +546,7 @@ int main(int argc, char** argv)
     int WHICH_GPU = 0;
     int FIRST_HALF_DATA = 0;
     int EVEN_HALF_DATA = 0;
-    float resample_threshold = 500.0; // hypotheses more than this far from the MAP get resampled every outer block
+    float resample_threshold = 100.0; // hypotheses more than this far from the MAP get resampled every outer block
     string in_file_path = "data.txt";
     string out_path = "out/";
     
@@ -584,8 +600,6 @@ int main(int argc, char** argv)
     // -----------------------------------------------------------------------
     
     string SAMPLE_PATH = out_path+"/samples.txt";
-    string LOG_PATH = out_path+"/log.txt";
-//     string PERFORMANCE_PATH = out_path+"/performance.txt";
     
     // -------------------------------------------------------------------------
     // Make the RNG replicable
@@ -593,25 +607,24 @@ int main(int argc, char** argv)
     if(seed==-1) { srand(time(NULL)); seed = rand(); }
 
     // -------------------------------------------------------------------------
-    // Write the log and performance log
+    // Log
     
-    FILE* fp = fopen(LOG_PATH.c_str(), "w");
-    if(fp==NULL) { cerr << "*** ERROR: Cannot open file:\t" << LOG_PATH <<"\n"; exit(1);}
+    FILE* fp = fopen(SAMPLE_PATH.c_str(), "a");
+    if(fp==NULL) { cerr << "*** ERROR: Cannot open file:\t" << SAMPLE_PATH <<"\n"; exit(1);}
     
-    fprintf(fp, "-----------------------------------------------------------------\n");
-    fprintf(fp, "-- Parameters:\n");
-    fprintf(fp, "-----------------------------------------------------------------\n");
-    fprintf(fp, "\tInput data path: %s\n", in_file_path.c_str());
-    fprintf(fp, "\tOutput path: %s\n", out_path.c_str());
-    fprintf(fp, "\tMCMC Iterations (per block): %i\n", steps);
-    fprintf(fp, "\tBlocks: %i\n", outer);
+    fprintf(fp, "# -----------------------------------------------------------------\n");
+    fprintf(fp, "# -- Parameters:\n");
+    fprintf(fp, "# -----------------------------------------------------------------\n");
+    fprintf(fp, "# \tInput data path: %s\n", in_file_path.c_str());
+    fprintf(fp, "# \tOutput path: %s\n", out_path.c_str());
+    fprintf(fp, "# \tMCMC Iterations (per block): %i\n", steps);
+    fprintf(fp, "# \tBlocks: %i\n", outer);
 //     fprintf(fp, "\tBurn Blocks: %i\n", BURN_BLOCKS);
-    fprintf(fp, "\tN chains: %i\n", N);
-    fprintf(fp, "\tseed: %i\n", seed);
-    fprintf(fp, "\tMax program length: %i\n", PROGRAM_LENGTH);
-    fprintf(fp, "\tN Constants: %i\n", NCONSTANTS);
-    fprintf(fp, "\n\n");
-    fclose(fp);
+    fprintf(fp, "# \tN chains: %i\n", N);
+    fprintf(fp, "# \tseed: %i\n", seed);
+    fprintf(fp, "# \tMax program length: %i\n", PROGRAM_LENGTH);
+    fprintf(fp, "# \tN Constants: %i\n", NCONSTANTS);
+    fprintf(fp, "#\n#\n");
     
     // -----------------------------------------------------------------------
     // Read the data and set up some arrays
@@ -623,12 +636,11 @@ int main(int argc, char** argv)
     
     
     // Echo the data we actually run with (post-filtering for even/firsthalf)
-    fp = fopen(LOG_PATH.c_str(), "a");
-    fprintf(fp, "\n-----------------------------------------------------------------\n");
-    fprintf(fp, "-- Data:\n");
-    fprintf(fp, "-----------------------------------------------------------------\n");
+    fprintf(fp, "# -----------------------------------------------------------------\n");
+    fprintf(fp, "# -- Data:\n");
+    fprintf(fp, "# -----------------------------------------------------------------\n");
     for(int i=0;i<ndata;i++) 
-        fprintf(fp, "\t%f\t%f\t%f\n", host_D[i].x, host_D[i].y, host_D[i].sd);
+        fprintf(fp, "# %f\t%f\t%f\n", host_D[i].x, host_D[i].y, host_D[i].sd);
     fclose(fp);
     
     // -----------------------------------------------------------------------
@@ -640,7 +652,7 @@ int main(int argc, char** argv)
     float* host_prior =  new float[N];
     float* host_likelihood =  new float[N]; 
     
-   
+
     for(int i=0;i<PROGRAM_LENGTH*N;i++) host_P[i] = rand_lim(NOPS-1);
     for(int i=0;i<NCONSTANTS*N;i++)     host_C[i] = CONSTANT_SCALE*random_cauchy();
     
@@ -649,13 +661,11 @@ int main(int argc, char** argv)
     // Allocate on device and copy
     // -----------------------------------------------------------------------
 
-
     DEVARRAY(datum, D, ndata) // defines device_D, 
     DEVARRAY(op,    P, N*PROGRAM_LENGTH) // device_P
     DEVARRAY(float, C, N*NCONSTANTS) // device_C
     DEVARRAY(float, prior, N) 
     DEVARRAY(float, likelihood, N) 
-    
     
     // -----------------------------------------------------------------------
     // Run
@@ -678,29 +688,34 @@ int main(int argc, char** argv)
         // and now print
         fp = fopen(SAMPLE_PATH.c_str(), "a");
         for(int h=0;h<N;h++) {
-	    fprintf(fp, "%d\t%d\t", h, o);
+            fprintf(fp, "%d\t%d\t", h, o);
 	    
             fprintf(fp, "%.4f\t%.4f\t%.4f\t", host_prior[h]+host_likelihood[h], host_prior[h], host_likelihood[h]);
-             
-//             for(int c=0;c<PROGRAM_LENGTH;c++){ 
-//                 fprintf(fp, "%d ", host_P[h+N*c]);
-//             }
-//             fprintf(fp, "\t\"");
-
+//              
+// //             for(int c=0;c<PROGRAM_LENGTH;c++){ 
+// //                 fprintf(fp, "%d ", host_P[h+N*c]);
+// //             }
+// //             fprintf(fp, "\t\"");
+// 
             fprintf(fp, "\"");
             displaystring("C", N, h, host_P, host_C, fp);
             
             fprintf(fp, "\"\t\"");
             
             displaystring("%.4f", N, h, host_P, host_C, fp);
-            fprintf(fp, "\"\t");
+            fprintf(fp, "\"\t\"");
+            
+            for(int i=0;i<PROGRAM_LENGTH;i++) {
+                fprintf(fp, "%c", PROGRAM_CODE[host_P[h+N*i]]);
+            }
+            fprintf(fp, "\"\t\t");
             
             for(int c=0;c<NCONSTANTS;c++){ 
                 fprintf(fp, "%.2f\t", host_C[h+N*c]);
             }
             
             fprintf(fp, "\n");
-            
+//             
         }
         fclose(fp);
         
@@ -722,12 +737,23 @@ int main(int argc, char** argv)
         // and copy back 
         cudaMemcpy(device_P, host_P, N*PROGRAM_LENGTH*sizeof(op), cudaMemcpyHostToDevice);  CUDA_CHECK();
         cudaMemcpy(device_C, host_C, N*NCONSTANTS*sizeof(float), cudaMemcpyHostToDevice);  CUDA_CHECK();
+        
+        // print a progress bar to stderr
+        int BAR_WIDTH = 70;
+        fprintf(stderr, "\r[");
+        for(int p=0;p<BAR_WIDTH;p++) { 
+            if(p <= o * BAR_WIDTH/outer) fprintf(stderr,"=");
+            else                         fprintf(stderr," ");
+            
+        }
+        fprintf(stderr, "]");
     }
         
         
     // -----------------------------------------------------------------------
     // Cleanup
     // -----------------------------------------------------------------------
+    fprintf(stderr, " Completed. \n");
     
     delete[] host_P;
     delete[] host_C;
