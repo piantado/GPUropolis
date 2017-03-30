@@ -26,8 +26,8 @@ const float PRIOR_MULTIPLIER = 1.0;
 const float CONST_LENGTH_PRIOR = 1.0; // how mcuh do constants cost in terms of length?
 const float X_LENGTH_PRIOR = 1.0; // how mcuh does X cost in terms of length?
 
-const int PROGRAM_LENGTH = 15;
-const int NCONSTANTS     = 15; // these must be equal in this version -- one constant for each program slot; although note the low ones are never used, right?
+const int PROGRAM_LENGTH = 7;//15;
+const int NCONSTANTS     = 7;//15; // these must be equal in this version -- one constant for each program slot; although note the low ones are never used, right?
 
 const float CONSTANT_SCALE = 10.0; // Maybe set to be the SD of the y values, fucntions as a scale over the constants in teh prior, proprosals
 
@@ -45,10 +45,10 @@ typedef struct datum {
     float y;
     float sd; // stdev of the output|input. 
 } datum;
-//          1   a  b   +      -       _      #      *      @      /    |     L    E    ^     p    V      P     R     S     A    T      G      B      A
-enum OPS { ONE, A, B, PLUS, MINUS, RMINUS, CPLUS, TIMES, CTIMES, DIV, RDIV, LOG, EXP, POW, CPOW, RPOW, CRPOW, SQRT, SIN, ASIN, ATAN, GAMMA, BESSEL, ABS,     NOPS};
+//          1     I   a  b   +      -       _      #      *      @      /    |     L    E    ^     p    V      P     R     S     A    T      G      B      A
+enum OPS { PONE, INV, A, B, PLUS, MINUS, RMINUS, CPLUS, TIMES, CTIMES, DIV, RDIV, LOG, EXP, POW, CPOW, RPOW, CRPOW, SQRT, SIN, ASIN, ATAN, GAMMA, BESSEL, ABS,     NOPS};
 const int SQR = -99; // if we want to remove some from OPS, use here so the code below doesn't break
-const char* PROGRAM_CODE = "1ab+-_#*@/|LE^pVPRSATGBA"; // if we want to print a concise description of the program (mainly for debugging) These MUST be algined with OPS
+const char* PROGRAM_CODE = "1Iab+-_#*@/|LE^pVPRSATGBA"; // if we want to print a concise description of the program (mainly for debugging) These MUST be algined with OPS
 
 
 // -----------------------------------------------------------------------
@@ -209,7 +209,8 @@ vector<datum>* load_data_file(const char* datapath, int FIRST_HALF_DATA, int EVE
 // evaluat a single operation op on arguments a and b
 __device__ float dispatch(op o, float x, float a, float b, float C) {
         switch(o) {
-            case ONE:    return 1.0;
+            case PONE:   return a + 1.0;
+            case INV:    return fdividef(1.0,a);
             case A:      return a; 
             case B:      return b; // need both since of how consts are passed in
             case PLUS:   return a+b;
@@ -225,7 +226,7 @@ __device__ float dispatch(op o, float x, float a, float b, float C) {
             case LOG:    return logf(a);
             case SIN:    return sin(a);
             case ASIN:   return asinf(a);
-            case ATAN:   return atanf(a/b);
+            case ATAN:   return atanf(a);
             case EXP:    return expf(a);
             case POW:    return powf(a,b);
             case CPOW:   return powf(a,C);
@@ -281,7 +282,8 @@ __device__ float compute_likelihood(int N, int idx, op* P, float* C, datum* D, i
 __device__ float dispatch_length(op o, float a, float b) {
     // count up the length for the prior
         switch(o) {
-            case ONE:    return 1;
+            case PONE:   return 1+a;
+            case INV:    return 1+a;
             case A:      return a; 
             case B:      return b; // need both since of how consts are passed in
             case PLUS:   return 1+a+b;
@@ -297,7 +299,7 @@ __device__ float dispatch_length(op o, float a, float b) {
             case LOG:    return 1+a;
             case SIN:    return 1+a;
             case ASIN:   return 1+a;
-            case ATAN:   return 1+a+b;
+            case ATAN:   return 1+a;
             case EXP:    return 1+a;
             case POW:    return 1+a+b;
             case CPOW:   return CONST_LENGTH_PRIOR+a;
@@ -462,7 +464,8 @@ __global__ void MH_simple_kernel(int N, op* P, float* C, datum* D, int ndata, in
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 void string_dispatch( char* target, op o, const char* a, const char* b, const char* C) {
         switch(o) {
-            case ONE:   strcat(target, "1"); break;
+            case PONE:  strcat(target, "(1+"); strcat(target, a); strcat(target, ")"); break;
+            case INV:   strcat(target, "(1/"); strcat(target, a); strcat(target, ")"); break;
             case A:     strcat(target, a); break;
             case B:     strcat(target, b); break;// need both since of how consts are passed in
             case PLUS:  strcat(target, "("); strcat(target, a); strcat(target, "+"); strcat(target, b); strcat(target, ")"); break;
@@ -476,7 +479,7 @@ void string_dispatch( char* target, op o, const char* a, const char* b, const ch
             case LOG:   strcat(target, "log("); strcat(target, a); strcat(target, ")"); break;
             case SIN:   strcat(target, "sin("); strcat(target, a); strcat(target, ")"); break;
             case ASIN:  strcat(target, "asin("); strcat(target, a); strcat(target, ")"); break;
-            case ATAN:  strcat(target, "atan("); strcat(target, a); strcat(target, "/"); strcat(target, b); strcat(target, ")"); break;
+            case ATAN:  strcat(target, "atan("); strcat(target, a); strcat(target, ")"); break;
             case SQR:   strcat(target, "(("); strcat(target, a); strcat(target, ")^2)"); break;
             case SQRT:  strcat(target, "sqrt("); strcat(target, a); strcat(target, ")"); break;
             case EXP:   strcat(target, "exp("); strcat(target, a); strcat(target, ")"); break;
