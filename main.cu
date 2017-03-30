@@ -26,8 +26,8 @@ const float PRIOR_MULTIPLIER = 1.0;
 const float CONST_LENGTH_PRIOR = 1.0; // how mcuh do constants cost in terms of length?
 const float X_LENGTH_PRIOR = 1.0; // how mcuh does X cost in terms of length?
 
-const int PROGRAM_LENGTH = 15;
-const int NCONSTANTS     = 15; // these must be equal in this version -- one constant for each program slot; although note the low ones are never used, right?
+const int PROGRAM_LENGTH = 3;//15;
+const int NCONSTANTS     = 3;//15; // these must be equal in this version -- one constant for each program slot; although note the low ones are never used, right?
 
 const float CONSTANT_SCALE = 10.0; // Maybe set to be the SD of the y values, fucntions as a scale over the constants in teh prior, proprosals
 
@@ -45,10 +45,10 @@ typedef struct datum {
     float y;
     float sd; // stdev of the output|input. 
 } datum;
-
+//          1   a  b   +      -       _      #      *      @      /    |     L    E    ^     p    V      P     R     S     A    T      G      B      A
 enum OPS { ONE, A, B, PLUS, MINUS, RMINUS, CPLUS, TIMES, CTIMES, DIV, RDIV, LOG, EXP, POW, CPOW, RPOW, CRPOW, SQRT, SIN, ASIN, ATAN, GAMMA, BESSEL, ABS,     NOPS};
 const int SQR = -99; // if we want to remove some from OPS, use here so the code below doesn't break
-const char* PROGRAM_CODE = "1ab+-_#*@/|le^pVPRsATGB%A"; // if we want to print a concise description of the program (mainly for debugging) These MUST be algined with OPS
+const char* PROGRAM_CODE = "1ab+-_#*@/|LE^pVPRSATGBA"; // if we want to print a concise description of the program (mainly for debugging) These MUST be algined with OPS
 
 
 // -----------------------------------------------------------------------
@@ -230,7 +230,7 @@ __device__ float dispatch(op o, float x, float a, float b, float C) {
             case POW:    return powf(a,b);
             case CPOW:   return powf(a,C);
             case RPOW:   return powf(b,a);
-            case CRPOW:  return powf(b,C);
+            case CRPOW:  return powf(C,a);
             case GAMMA:  return tgammaf(a);
             case BESSEL: return j0f(a);
             case ABS:    return fabsf(a);
@@ -261,11 +261,14 @@ __device__ float call(int N, int idx, op* P, float* C, float x) {
 __device__ float compute_likelihood(int N, int idx, op* P, float* C, datum* D, int ndata) {
     float ll = 0.0; // total ll 
     for(int di=0;di<ndata;di++) {
+        
         float fx = call(N, idx, P, C, D[di].x);
-	
-        if(is_invalid(fx)) return -CUDART_INF_F;
+	if(is_invalid(fx)) return -CUDART_INF_F;
 	  
-        ll += lnormalpdf(fx-D[di].y, D[di].sd);
+        float l = lnormalpdf(fx-D[di].y, D[di].sd);
+        if(is_invalid(l)) return -CUDART_INF_F;
+        
+        ll += l;
     }
     return ll;
     
@@ -480,7 +483,7 @@ void string_dispatch( char* target, op o, const char* a, const char* b, const ch
             case POW:   strcat(target, "("); strcat(target, a); strcat(target, "^"); strcat(target, b); strcat(target, ")"); break;
             case CPOW:  strcat(target, "("); strcat(target, a); strcat(target, "^"); strcat(target, C); strcat(target, ")"); break;
             case RPOW:  strcat(target, "("); strcat(target, b); strcat(target, "^"); strcat(target, a); strcat(target, ")"); break;
-            case CRPOW: strcat(target, "("); strcat(target, b); strcat(target, "^"); strcat(target, C); strcat(target, ")"); break;
+            case CRPOW: strcat(target, "("); strcat(target, C); strcat(target, "^"); strcat(target, a); strcat(target, ")"); break;
             case GAMMA: strcat(target, "gamma("); strcat(target,a); strcat(target, ")"); break;
             case BESSEL:strcat(target, "besselJ("); strcat(target, a); strcat(target, ",0)"); break;
             case ABS:   strcat(target, "abs("); strcat(target, a); strcat(target, ")"); break;
@@ -488,7 +491,7 @@ void string_dispatch( char* target, op o, const char* a, const char* b, const ch
         }    
 }
 
-char buf[PROGRAM_LENGTH+1][1000]; 
+char buf[2*PROGRAM_LENGTH+2][1000]; 
 char cbuf[100];
 void displaystring(const char* const_format, int N, int idx, op* P, float* C, FILE* fp){
 
@@ -498,13 +501,12 @@ void displaystring(const char* const_format, int N, int idx, op* P, float* C, FI
 
         strcpy(buf[i],""); // must zero since dispatch appends. 
 
-        if(lidx>PROGRAM_LENGTH){
-            strcpy(buf[i],"x"); 
-        }
-        else {
-            sprintf(cbuf, const_format, C[idx+(i-1)*N]); // in case we need it
-            string_dispatch(buf[i], P[idx+(i-1)*N], buf[lidx], buf[ridx], cbuf);
-        }
+        // put the xes there if we should
+        if(lidx>PROGRAM_LENGTH) strcpy(buf[lidx],"x");
+        if(ridx>PROGRAM_LENGTH) strcpy(buf[ridx],"x"); 
+        
+        sprintf(cbuf, const_format, C[idx+(i-1)*N]); // in case we need it
+        string_dispatch(buf[i], P[idx+(i-1)*N], buf[lidx], buf[ridx], cbuf);
     }
     fprintf(fp, "%s", buf[1]);
 }
