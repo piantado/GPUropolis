@@ -26,8 +26,8 @@ const float PRIOR_MULTIPLIER = 1.0;
 const float CONST_LENGTH_PRIOR = 1.0; // how mcuh do constants cost in terms of length?
 const float X_LENGTH_PRIOR = 1.0; // how mcuh does X cost in terms of length?
 
-const int PROGRAM_LENGTH = 3;//15;
-const int NCONSTANTS     = 3;//15; // these must be equal in this version -- one constant for each program slot; although note the low ones are never used, right?
+const int PROGRAM_LENGTH = 15;
+const int NCONSTANTS     = 15; // these must be equal in this version -- one constant for each program slot; although note the low ones are never used, right?
 
 const float CONSTANT_SCALE = 10.0; // Maybe set to be the SD of the y values, fucntions as a scale over the constants in teh prior, proprosals
 

@@ -4,7 +4,7 @@ library(scales) # for adding alpha
 
 
 # DIRECTORY="out/data-sources/NIST/Bennett5/"
-DIRECTORY="out/data-sources/Science/KeplerThird/"
+DIRECTORY="out/data-sources/Science/AllometricScaling/"
 # DIRECTORY="run/data-sources/Science/Galileo-/"
 # DIRECTORY="run/data-sources/Science/Fibonacci-/"
 # DIRECTORY="out/"
@@ -15,7 +15,7 @@ d <- read.table(paste(DIRECTORY, "tops.txt", sep="/"), sep="\t")
 names(d) <- c("thread", "outer", "posterior", "prior", "likelihood", "h.struct", "h")
 
 
-CUTOFF=50
+CUTOFF=10
 
 data <- read.table(paste(DIRECTORY, "data.txt", sep="/"))
 
