@@ -6,7 +6,12 @@
 
     This version uses constants at the bottom of the tree, instead of a constant at each 
     program position that is potentially available to a constant-op 
+    
+    Maybe wha twe should do is include the first data point or two so we can model differences?
  */
+// 
+// SEE THE MCMC KERNEL THE LIKELIHOODS ARE NOT RIGHT -- CURRENT IS NOT THE SAME AS RECOMPUTING IT
+// -- Seems like there are some that are not penlzied in the likelihood correctly...
 
 
 #include <stdio.h>
@@ -247,8 +252,18 @@ __device__ float call(int N, int idx, op* P, float* C, float x) {
         int lidx = 2*i; // indices of the children
         int ridx = 2*i+1;
         
-        if(lidx > PROGRAM_LENGTH) buf[i] = x; // the default value at the base of the tree
-        else                      buf[i] = dispatch(P[idx+(i-1)*N], x, buf[lidx], buf[ridx], C[idx+(i-1)*N]); // P[...-1] since P is zero-indexed
+        float lvalue = 0.0;
+        float rvalue = 0.0;
+        
+        if(lidx > PROGRAM_LENGTH) {
+            lvalue = x; // the default value at the base of the tree
+            rvalue = x;
+        } else {
+            lvalue = buf[lidx];
+            rvalue = buf[ridx];
+        }
+        
+        buf[i] = dispatch(P[idx+(i-1)*N], x, lvalue, rvalue, C[idx+(i-1)*N]); // P[...-1] since P is zero-indexed
     }
     // now buf[1] stores the output, which is the top node
     
@@ -264,10 +279,10 @@ __device__ float compute_likelihood(int N, int idx, op* P, float* C, datum* D, i
     for(int di=0;di<ndata;di++) {
         
         float fx = call(N, idx, P, C, D[di].x);
-	if(is_invalid(fx)) return -CUDART_INF_F;
+        if(is_invalid(fx)) return -1.0/0.0; //-CUDART_INF_F;
 	  
         float l = lnormalpdf(fx-D[di].y, D[di].sd);
-        if(is_invalid(l)) return -CUDART_INF_F;
+        if(is_invalid(l)) return -1.0/0.0;;//-CUDART_INF_F;
         
         ll += l;
     }
@@ -366,7 +381,7 @@ __device__ int is_descendant(int n, int k) {
 
 __global__ void MH_simple_kernel(int N, op* P, float* C, datum* D, int ndata, int steps, float* prior, float* likelihood, int random_seed)
 {
-	int idx = blockIdx.x * blockDim.x + threadIdx.x;
+	const int idx = blockIdx.x * blockDim.x + threadIdx.x;
 	if(idx >= N) { return; }  // MUST have this or else all hell breaks loose
 
     float current_prior = compute_prior(N, idx, P, C);
@@ -398,8 +413,7 @@ __global__ void MH_simple_kernel(int N, op* P, float* C, datum* D, int ndata, in
                     
 //                     now make a proposal to every descendant of n
                     if(is_descendant(n,i)) { // translate i into 1-based indexing used for binary tree encoding.
-                        P[i] = random_int(NOPS, RNG_ARGS);
-                        // TODO: ADD If there is a constant below, propose from the prior?
+                        P[idx+i*N] = random_int(NOPS, RNG_ARGS);
                     }
                     
                 }
@@ -495,6 +509,7 @@ void string_dispatch( char* target, op o, const char* a, const char* b, const ch
 }
 
 char buf[2*PROGRAM_LENGTH+2][1000]; 
+char lbuf[100], rbuf[100];
 char cbuf[100];
 void displaystring(const char* const_format, int N, int idx, op* P, float* C, FILE* fp){
 
@@ -505,11 +520,15 @@ void displaystring(const char* const_format, int N, int idx, op* P, float* C, FI
         strcpy(buf[i],""); // must zero since dispatch appends. 
 
         // put the xes there if we should
-        if(lidx>PROGRAM_LENGTH) strcpy(buf[lidx],"x");
-        if(ridx>PROGRAM_LENGTH) strcpy(buf[ridx],"x"); 
+        if(lidx>PROGRAM_LENGTH) strcpy(lbuf,"x");
+        else                    strcpy(lbuf, buf[lidx]);
+        
+        if(ridx>PROGRAM_LENGTH) strcpy(rbuf,"x"); 
+        else                    strcpy(rbuf, buf[ridx]);
         
         sprintf(cbuf, const_format, C[idx+(i-1)*N]); // in case we need it
-        string_dispatch(buf[i], P[idx+(i-1)*N], buf[lidx], buf[ridx], cbuf);
+        
+        string_dispatch(buf[i], P[idx+(i-1)*N], lbuf, rbuf, cbuf);
     }
     fprintf(fp, "%s", buf[1]);
 }
@@ -609,7 +628,10 @@ int main(int argc, char** argv)
     // -------------------------------------------------------------------------
     // Make the RNG replicable
     
-    if(seed==-1) { srand(time(NULL)); seed = rand(); }
+    if(seed==-1) { srand(time(NULL));  }
+    else{          srand(seed); }
+    
+    seed = rand();
 
     // -------------------------------------------------------------------------
     // Log
@@ -727,7 +749,28 @@ int main(int argc, char** argv)
         // find the MAP so far
         float map_so_far = -9e99;
         for(int h=0;h<N;h++) { 
-            if(host_prior[h]+host_likelihood[h] > map_so_far) 
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            if(1) //if(host_prior[h]+host_likelihood[h] > map_so_far) 
                 map_so_far = host_prior[h]+host_likelihood[h];
         }
         

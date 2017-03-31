@@ -1,5 +1,5 @@
 ## NOTE: This CUDA version must be set to your local version or it will not compile!
-CUDA_VERSION=8.0
+CUDA_VERSION=7.0
 
 CUDA_SAMPLES_INCLUDE=/usr/local/cuda/samples/common/inc/
 CUDA_INCLUDE=/usr/local/cuda/lib64 
