@@ -7,11 +7,7 @@
     This version uses constants at the bottom of the tree, instead of a constant at each 
     program position that is potentially available to a constant-op 
     
-    Maybe wha twe should do is include the first data point or two so we can model differences?
  */
-// 
-// SEE THE MCMC KERNEL THE LIKELIHOODS ARE NOT RIGHT -- CURRENT IS NOT THE SAME AS RECOMPUTING IT
-// -- Seems like there are some that are not penlzied in the likelihood correctly...
 
 
 #include <stdio.h>
