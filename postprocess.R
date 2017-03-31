@@ -15,7 +15,7 @@ d <- read.table(paste(DIRECTORY, "samples.txt", sep="/"), sep="\t")
 names(d) <- c("thread", "outer", "posterior", "prior", "likelihood", "h.struct", "h")
 
 
-CUTOFF=10
+CUTOFF <- 3
 
 data <- read.table(paste(DIRECTORY, "data.txt", sep="/"))
 

@@ -336,10 +336,22 @@ __device__ float compute_prior(int N, int idx, op* P, float* C) {
         
         op o = P[idx+(i-1)*N];
         
-        if(lidx>PROGRAM_LENGTH) len[i] = X_LENGTH_PRIOR; // x has length 1
-        else                    len[i] = dispatch_length(o, len[lidx], len[ridx]);
+        float lvalue, rvalue;
         
-
+        if(lidx>PROGRAM_LENGTH) {
+            lvalue = X_LENGTH_PRIOR; // x has length 1
+        } else {
+            lvalue = len[lidx];
+        }
+        
+        if(ridx>PROGRAM_LENGTH) {
+            rvalue = X_LENGTH_PRIOR; // x has length 1
+        } else {
+            rvalue = len[ridx];
+        }
+        
+        
+        len[i] = dispatch_length(o, lvalue, rvalue);
     }
       
     float prior = -PRIOR_MULTIPLIER * len[1]; // the total length at the top
