@@ -23,12 +23,12 @@
 
 using namespace std;
 
-const float PRIOR_MULTIPLIER = 1.0; 
+const float PRIOR_MULTIPLIER = 10.0; 
 const float CONST_LENGTH_PRIOR = 1.0; // how mcuh do constants cost in terms of length?
 const float X_LENGTH_PRIOR = 1.0; // how mcuh does X cost in terms of length?
 
-const int PROGRAM_LENGTH = 7;//15;
-const int NCONSTANTS     = 7;//15; // these must be equal in this version -- one constant for each program slot; although note the low ones are never used, right?
+const int PROGRAM_LENGTH = 15;
+const int NCONSTANTS     = 15; // these must be equal in this version -- one constant for each program slot; although note the low ones are never used, right?
 
 const float CONSTANT_SCALE = 10.0; // Maybe set to be the SD of the y values, fucntions as a scale over the constants in teh prior, proprosals
 
@@ -172,9 +172,11 @@ vector<datum>* load_data_file(const char* datapath, int FIRST_HALF_DATA, int EVE
 		if( line[0] == '#' ) continue;  // skip comments
 		else if (sscanf(line, "%f\t%f\t%f\n", &x, &y, &sd) == 3) { // floats
 			d->push_back( (datum){.x=(float)x, .y=(float)y, .sd=(float)sd} );
+                        assert((float)sd > 0.0);
 		}
 		else if (sscanf(line, "%e\t%e\t%e\n", &x, &y, &sd) == 3) { // scientific notation
 			d->push_back( (datum){.x=(float)x, .y=(float)y, .sd=(float)sd} );
+                        assert((float)sd > 0.0);
 		}
 		else if ( strspn(line, " \r\n\t") == strlen(line) ) { // skip whitespace
 			continue;
@@ -757,28 +759,7 @@ int main(int argc, char** argv)
         // find the MAP so far
         float map_so_far = -9e99;
         for(int h=0;h<N;h++) { 
-            
-            
-            
-            
-            
-            
-            
-            
-            
-            
-            
-            
-            
-            
-            
-            
-            
-            
-            
-            
-            
-            if(1) //if(host_prior[h]+host_likelihood[h] > map_so_far) 
+            if(host_prior[h]+host_likelihood[h] > map_so_far) 
                 map_so_far = host_prior[h]+host_likelihood[h];
         }
         
