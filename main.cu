@@ -2,13 +2,9 @@
  * GPUropolis - 2017 March 10 - Steve Piantadosi 
  *
  * Simple tree-regeneration on CUDA with coalesced memory access
- * 
-
-    This version uses constants at the bottom of the tree, instead of a constant at each 
-    program position that is potentially available to a constant-op 
-    
+ *     
+ * TODO: Allow only constant functions if we want them?
  */
-
 
 #include <stdio.h>
 #include <time.h>
