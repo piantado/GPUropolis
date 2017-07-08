@@ -214,10 +214,35 @@ vector<datum>* load_data_file(const char* datapath, int FIRST_HALF_DATA, int EVE
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Run programs
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-   
+
+// define a template to fold any function over  
+template<class T> T fold(int N, int idx, op* P, data_t* C, T leaf, T dispatch(op,T,T,T,T) ) {
+   T buf[PROGRAM_LENGTH+1]; // we'll waste one space here at the beginning to simplify everything else
+    
+    for(int i=PROGRAM_LENGTH;i>=1;i--) { // start at the last node
+        int lidx = 2*i; // indices of the children, assuming 1-indexing
+        int ridx = 2*i+1;
+        
+        T lvalue, rvalue;        
+        if(lidx > PROGRAM_LENGTH) {
+            lvalue = leaf; // the default value at the base of the tree
+            rvalue = leaf;
+        } else {
+            lvalue = buf[lidx];s
+            rvalue = buf[ridx];
+        }
+        
+        buf[i] = dispatch(P[idx+(i-1)*N], x, lvalue, rvalue, C[idx+(i-1)*N]); // P[...-1] since P is zero-indexed
+    }
+    
+    return buf[1];/
+}
+// __device__ 
+
+
 // TODO: Make inline
 // evaluat a single operation op on arguments a and b
-__device__ data_t dispatch(op o, data_t x, data_t a, data_t b, data_t C) {
+__device__ data_t dispatch(op o, data_t a, data_t b, data_t C) {
         switch(o) {
             case PONE:   return a + 1.0;
             case INV:    return fdividef(1.0,a);
@@ -268,7 +293,7 @@ __device__ data_t call(int N, int idx, op* P, data_t* C, data_t x) {
             rvalue = buf[ridx];
         }
         
-        buf[i] = dispatch(P[idx+(i-1)*N], x, lvalue, rvalue, C[idx+(i-1)*N]); // P[...-1] since P is zero-indexed
+        buf[i] = dispatch(P[idx+(i-1)*N], lvalue, rvalue, C[idx+(i-1)*N]); // P[...-1] since P is zero-indexed
     }
     // now buf[1] stores the output, which is the top node
     
@@ -338,9 +363,7 @@ __device__ float dispatch_length(op o, float a, float b) {
 }
 
 
-
-
-__device__ bayes_t compute_prior(int N, int idx, op* P, float* C) {
+__device__ bayes_t compute_prior(int N, int idx, op* P, data_t* C) {
     
     bayes_t len[PROGRAM_LENGTH+1]; // how long is the tree below? 
     
