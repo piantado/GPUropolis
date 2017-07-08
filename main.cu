@@ -19,12 +19,12 @@
 
 using namespace std;
 
-const float PRIOR_MULTIPLIER = 10.0; 
+const float PRIOR_MULTIPLIER = 10.0; // prior is exp(-PRIOR_MULTIPLIER * length) 
 const float CONST_LENGTH_PRIOR = 1.0; // how much do constants cost in terms of length?
 const float X_LENGTH_PRIOR = 1.0; // how much does X cost in terms of length?
 
-const int PROGRAM_LENGTH = 15;
-const int NCONSTANTS     = 15; // these must be equal in this version -- one constant for each program slot; although note the low ones are never used, right?
+const int PROGRAM_LENGTH = 15; // how many operations do we allow?
+const int NCONSTANTS     = 15; 
 
 const float CONSTANT_SCALE = 10.0; // Maybe set to be the SD of the y values, fucntions as a scale over the constants in teh prior, proprosals
 
@@ -34,12 +34,16 @@ int N_BLOCKS = 0; // set below
 const int HARDARE_MAX_X_BLOCKS = 1024;
 const int HARDWARE_MAX_THREADS_PER_BLOCK = 1024; // cannot exceed this many threads per block! For compute level 2.x and greater!
 
+/* Define a few types so that we can change precision if we need to */
 typedef int op; // what type is the program primitives?
+typedef float data_t; // the type of the data we read and operate on in the program
+typedef float bayes_t; // when we compute Bayesian things (priors, likelihoods, etc.) what type do we use?
 
+/* A structure to hold data: x,y,stdev pairs */
 typedef struct datum {
-    float x;
-    float y;
-    float sd; // stdev of the output|input. 
+    data_t x;
+    data_t y;
+    data_t sd; // stdev of the output|input. 
 } datum;
 
 //          1     I   a  b   +      -       _      #      *      @      /    |     L    E    ^     p    V      P     R     S     A    T      G      A
@@ -77,6 +81,12 @@ const char* PROGRAM_CODE = "1Iab+-_#*@/|LE^pVPRSATGA"; // if we want to print a 
 
 #define PIf 3.141592653589 
  
+/* These macros allow us to use RNG_DEF and RNG_ARGS in function calls, and swap out 
+ * for other variable sif we want to. e.g. 
+ * 	int rand(int n, RNG_DEF){
+ * 		....
+ *	}
+ * allows rx to be used inside. */
 #define RNG_DEF int& rx
 #define RNG_ARGS rx
 
@@ -164,16 +174,16 @@ vector<datum>* load_data_file(const char* datapath, int FIRST_HALF_DATA, int EVE
 	if(fp==NULL) { cerr << "*** ERROR: Cannot open file:\t" << datapath <<"\n"; exit(1);}
 	
 	vector<datum>* d = new vector<datum>();
-	char* line = NULL; size_t len=0; float x,y,sd; 
+	char* line = NULL; size_t len=0; data_t x,y,sd; 
 	while( getline(&line, &len, fp) != -1) {
 		if( line[0] == '#' ) continue;  // skip comments
 		else if (sscanf(line, "%f\t%f\t%f\n", &x, &y, &sd) == 3) { // floats
-			d->push_back( (datum){.x=(float)x, .y=(float)y, .sd=(float)sd} );
-                        assert((float)sd > 0.0);
+			d->push_back( (datum){.x=(data_t)x, .y=(data_t)y, .sd=(data_t)sd} );
+                        assert((data_t)sd > 0.0);
 		}
 		else if (sscanf(line, "%e\t%e\t%e\n", &x, &y, &sd) == 3) { // scientific notation
-			d->push_back( (datum){.x=(float)x, .y=(float)y, .sd=(float)sd} );
-                        assert((float)sd > 0.0);
+			d->push_back( (datum){.x=(data_t)x, .y=(data_t)y, .sd=(data_t)sd} );
+                        assert((data_t)sd > 0.0);
 		}
 		else if ( strspn(line, " \r\n\t") == strlen(line) ) { // skip whitespace
 			continue;
@@ -207,7 +217,7 @@ vector<datum>* load_data_file(const char* datapath, int FIRST_HALF_DATA, int EVE
    
 // TODO: Make inline
 // evaluat a single operation op on arguments a and b
-__device__ float dispatch(op o, float x, float a, float b, float C) {
+__device__ data_t dispatch(op o, data_t x, data_t a, data_t b, data_t C) {
         switch(o) {
             case PONE:   return a + 1.0;
             case INV:    return fdividef(1.0,a);
@@ -239,16 +249,16 @@ __device__ float dispatch(op o, float x, float a, float b, float C) {
         }    
 }
 
-__device__ float call(int N, int idx, op* P, float* C, float x) {
+__device__ data_t call(int N, int idx, op* P, data_t* C, data_t x) {
     // start at the first non-leaves
-    float buf[PROGRAM_LENGTH+1]; // we'll waste one space here at the beginning to simplify everything else
+    data_t buf[PROGRAM_LENGTH+1]; // we'll waste one space here at the beginning to simplify everything else
     
     for(int i=PROGRAM_LENGTH;i>=1;i--) { // start at the last node
         int lidx = 2*i; // indices of the children
         int ridx = 2*i+1;
         
-        float lvalue = 0.0;
-        float rvalue = 0.0;
+        data_t lvalue = 0.0;
+        data_t rvalue = 0.0;
         
         if(lidx > PROGRAM_LENGTH) {
             lvalue = x; // the default value at the base of the tree
@@ -269,14 +279,14 @@ __device__ float call(int N, int idx, op* P, float* C, float x) {
 // Compute the likelihood
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-__device__ float compute_likelihood(int N, int idx, op* P, float* C, datum* D, int ndata) {
-    float ll = 0.0; // total ll 
+__device__ bayes_t compute_likelihood(int N, int idx, op* P, data_t* C, datum* D, int ndata) {
+    bayes_t ll = 0.0; // total ll 
     for(int di=0;di<ndata;di++) {
         
-        float fx = call(N, idx, P, C, D[di].x);
+        data_t fx = call(N, idx, P, C, D[di].x);
         if(is_invalid(fx)) return -CUDART_INF_F;
 	  
-        float l = lnormalpdf(fx-D[di].y, D[di].sd);
+        bayes_t l = lnormalpdf(fx-D[di].y, D[di].sd);
         if(is_invalid(l)) return -CUDART_INF_F;
         
         // WHY DOESNT THIS GIVE DIFFERENT ANSWERS FOR BAD EQUATIONS?
@@ -330,9 +340,9 @@ __device__ float dispatch_length(op o, float a, float b) {
 
 
 
-__device__ float compute_prior(int N, int idx, op* P, float* C) {
+__device__ bayes_t compute_prior(int N, int idx, op* P, float* C) {
     
-    float len[PROGRAM_LENGTH+1]; // how long is the tree below? 
+    bayes_t len[PROGRAM_LENGTH+1]; // how long is the tree below? 
     
     for(int i=PROGRAM_LENGTH;i>=1;i--) { // start at the last node
         int lidx = 2*i; // indices of the children
@@ -340,7 +350,7 @@ __device__ float compute_prior(int N, int idx, op* P, float* C) {
         
         op o = P[idx+(i-1)*N];
         
-        float lvalue, rvalue;
+        bayes_t lvalue, rvalue;
         
         if(lidx>PROGRAM_LENGTH) {
             lvalue = X_LENGTH_PRIOR; // x has length 1
@@ -358,7 +368,7 @@ __device__ float compute_prior(int N, int idx, op* P, float* C) {
         len[i] = dispatch_length(o, lvalue, rvalue);
     }
       
-    float prior = -PRIOR_MULTIPLIER * len[1]; // the total length at the top
+    bayes_t prior = -PRIOR_MULTIPLIER * len[1]; // the total length at the top
 
     for(int c=0;c<NCONSTANTS;c++) {
         prior += lcauchypdf(C[idx+c*N], CONSTANT_SCALE); // proportional to cauchy density
@@ -391,13 +401,13 @@ __device__ int is_descendant(int n, int k) {
     return 0;
 }
 
-__global__ void MH_simple_kernel(int N, op* P, float* C, datum* D, int ndata, int steps, float* prior, float* likelihood, int random_seed){
+__global__ void MH_simple_kernel(int N, op* P, data_t* C, datum* D, int ndata, int steps, bayes_t* prior, bayes_t* likelihood, int random_seed){
     const int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if(idx >= N) { return; }  // MUST have this or else all hell breaks loose
 
-    float current_prior = compute_prior(N, idx, P, C);
-    float current_likelihood = compute_likelihood(N, idx, P, C, D, ndata);
-    float current = current_prior + current_likelihood;
+    bayes_t current_prior = compute_prior(N, idx, P, C);
+    bayes_t current_likelihood = compute_likelihood(N, idx, P, C, D, ndata);
+    bayes_t current = current_prior + current_likelihood;
         
     // Two possibilities here. We could let everything do the same proposals (for all steps) in which case we don't
     // add idx. This makes them access the same memory, etc. Alternatively we could add idx and make them separate
@@ -429,9 +439,9 @@ __global__ void MH_simple_kernel(int N, op* P, float* C, datum* D, int ndata, in
                     
                 }
                 
-                float proposal_prior = compute_prior(N, idx, P, C);
-                float proposal_likelihood = compute_likelihood(N, idx, P, C, D, ndata);
-                float proposal = proposal_prior + proposal_likelihood;
+                bayes_t proposal_prior = compute_prior(N, idx, P, C);
+                bayes_t proposal_likelihood = compute_likelihood(N, idx, P, C, D, ndata);
+                bayes_t proposal = proposal_prior + proposal_likelihood;
                         
                 if(is_valid(proposal) && (proposal>current || random_float(RNG_ARGS) < expf(proposal-current))) {
                     current = proposal; // store the updated posterior
@@ -449,7 +459,7 @@ __global__ void MH_simple_kernel(int N, op* P, float* C, datum* D, int ndata, in
         else { // propose to a constant otherwise
                 
                 int i = idx + N*random_int(NCONSTANTS, RNG_ARGS);
-                float old = C[i];
+                data_t old = C[i];
                 
                 // choose what kind of proposal
                 if(random_int(2,RNG_ARGS) == 0){
@@ -459,9 +469,9 @@ __global__ void MH_simple_kernel(int N, op* P, float* C, datum* D, int ndata, in
                 }
                 // TODO: Maybe make proposals relative to the size of the constant?
                 
-                float proposal_prior = compute_prior(N, idx, P, C);
-                float proposal_likelihood = compute_likelihood(N, idx, P, C, D, ndata);
-                float proposal = proposal_prior + proposal_likelihood;
+                bayes_t proposal_prior = compute_prior(N, idx, P, C);
+                bayes_t proposal_likelihood = compute_likelihood(N, idx, P, C, D, ndata);
+                bayes_t proposal = proposal_prior + proposal_likelihood;
                         
                 if((is_valid(proposal) && (proposal>current || random_float(RNG_ARGS) < expf(proposal-current))) || is_invalid(current)) {
                     current = proposal; // store the updated posterior
@@ -685,9 +695,9 @@ int main(int argc, char** argv)
     // -----------------------------------------------------------------------
     
     op*    host_P =   new op[N*PROGRAM_LENGTH];
-    float* host_C =  new float[N*NCONSTANTS];
-    float* host_prior =  new float[N];
-    float* host_likelihood =  new float[N]; 
+    data_t* host_C =  new data_t[N*NCONSTANTS];
+    bayes_t* host_prior =  new bayes_t[N];
+    bayes_t* host_likelihood =  new bayes_t[N]; 
     
 
     for(int i=0;i<PROGRAM_LENGTH*N;i++) host_P[i] = rand_lim(NOPS-1);
@@ -700,9 +710,9 @@ int main(int argc, char** argv)
 
     DEVARRAY(datum, D, ndata) // defines device_D, 
     DEVARRAY(op,    P, N*PROGRAM_LENGTH) // device_P
-    DEVARRAY(float, C, N*NCONSTANTS) // device_C
-    DEVARRAY(float, prior, N) 
-    DEVARRAY(float, likelihood, N) 
+    DEVARRAY(data_t, C, N*NCONSTANTS) // device_C
+    DEVARRAY(bayes_t, prior, N) 
+    DEVARRAY(bayes_t, likelihood, N) 
     
     // -----------------------------------------------------------------------
     // Run
@@ -717,9 +727,9 @@ int main(int argc, char** argv)
     
         // copy memory back 
         cudaMemcpy(host_P, device_P, N*sizeof(op)*PROGRAM_LENGTH, cudaMemcpyDeviceToHost); CUDA_CHECK();
-        cudaMemcpy(host_C, device_C, N*sizeof(float)*NCONSTANTS, cudaMemcpyDeviceToHost); CUDA_CHECK();
-        cudaMemcpy(host_prior, device_prior, N*sizeof(float), cudaMemcpyDeviceToHost); CUDA_CHECK();
-        cudaMemcpy(host_likelihood, device_likelihood, N*sizeof(float), cudaMemcpyDeviceToHost); CUDA_CHECK();
+        cudaMemcpy(host_C, device_C, N*sizeof(data_t)*NCONSTANTS, cudaMemcpyDeviceToHost); CUDA_CHECK();
+        cudaMemcpy(host_prior, device_prior, N*sizeof(bayes_t), cudaMemcpyDeviceToHost); CUDA_CHECK();
+        cudaMemcpy(host_likelihood, device_likelihood, N*sizeof(bayes_t), cudaMemcpyDeviceToHost); CUDA_CHECK();
         cudaDeviceSynchronize(); // wait for preceedings requests to finish
         
         // and now print
@@ -757,7 +767,7 @@ int main(int argc, char** argv)
         fclose(fp);
         
         // find the MAP so far
-        float map_so_far = -9e99;
+        bayes_t map_so_far = -9e99;
         for(int h=0;h<N;h++) { 
             if(host_prior[h]+host_likelihood[h] > map_so_far) 
                 map_so_far = host_prior[h]+host_likelihood[h];
@@ -773,7 +783,7 @@ int main(int argc, char** argv)
         }
         // and copy back 
         cudaMemcpy(device_P, host_P, N*PROGRAM_LENGTH*sizeof(op), cudaMemcpyHostToDevice);  CUDA_CHECK();
-        cudaMemcpy(device_C, host_C, N*NCONSTANTS*sizeof(float), cudaMemcpyHostToDevice);  CUDA_CHECK();
+        cudaMemcpy(device_C, host_C, N*NCONSTANTS*sizeof(data_t), cudaMemcpyHostToDevice);  CUDA_CHECK();
         
         // print a progress bar to stderr
         int BAR_WIDTH = 70;

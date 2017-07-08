@@ -1,7 +1,7 @@
  
-ITERATIONS=20000
+ITERATIONS=50000
 OUTER_BLOCKS=100
-N=5000 #0
+N=8192 
 OUTROOT=run/
 BURN=0
 
@@ -23,7 +23,7 @@ OUTROOT=./out
 # for DATA in $(ls -d data-sources/NIST/*) $(ls -d data-sources/Regression/*) ; do
 # for DATA in $(ls -d data-sources/Regression/60_100); do
 # for DATA in $(ls -d data-sources/Regression/*); do
-for DATA in $(ls -d data-sources/Stats/*) $(ls -d data-sources/Means/*) $(ls -d data-sources/Polynomial/*)  $(ls -d data-sources/Science/*)  $(ls -d data-sources/NIST/*);  do
+for DATA in $(ls -d data-sources/Stats/*) $(ls -d data-sources/Means/*) $(ls -d data-sources/Polynomial/*)  $(ls -d data-sources/Science/*)  $(ls -d data-sources/NIST/*) $(ls -d data-sources/Regression/*);  do
 # for DATA in $(ls -d data-sources/Science/CLT); do
 # for DATA in $(ls -d data-sources/Science/*) ; do
 #for DATA in $(ls -d data-sources/Science/*)  $(ls -d data-sources/Stats/*) $(ls -d data-sources/Polynomial/*)  $(ls -d data-sources/NIST/*)  $(ls -d data-sources/Regression/*) ; do
@@ -45,7 +45,7 @@ for DATA in $(ls -d data-sources/Stats/*) $(ls -d data-sources/Means/*) $(ls -d 
 	sort -g -k3 --parallel=8 $OUT/samples.txt | tail -n 10000 > $OUT/tops.txt &
 	
 	
-	nice -n 19 7z a $OUT/samples.7z $OUT/samples.txt && rm $OUT/samples.txt &
+# 	nice -n 19 7z a $OUT/samples.7z $OUT/samples.txt && rm $OUT/samples.txt &
 	
 	# And a python post-processing script to do plotting.
 	# Run in the background so we can move to the next plot

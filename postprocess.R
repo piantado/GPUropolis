@@ -7,7 +7,7 @@ library(scales) # for adding alpha
 # DIRECTORY="out/data-sources/Science/BalmerSeries/"
 # DIRECTORY="run/data-sources/Science/Galileo-/"
 # DIRECTORY="run/data-sources/Science/Fibonacci-/"
-DIRECTORY="out/data-sources/Stats/Constant-100/"
+DIRECTORY="out/data-sources/Stats/Constant-10/"
 # DIRECTORY="out/"
 # DIRECTORY="run/data-sources/Regression/60_100-/"
 
