@@ -24,8 +24,8 @@
 using namespace std;
 
 const float PRIOR_MULTIPLIER = 10.0; 
-const float CONST_LENGTH_PRIOR = 1.0; // how mcuh do constants cost in terms of length?
-const float X_LENGTH_PRIOR = 1.0; // how mcuh does X cost in terms of length?
+const float CONST_LENGTH_PRIOR = 1.0; // how much do constants cost in terms of length?
+const float X_LENGTH_PRIOR = 1.0; // how much does X cost in terms of length?
 
 const int PROGRAM_LENGTH = 15;
 const int NCONSTANTS     = 15; // these must be equal in this version -- one constant for each program slot; although note the low ones are never used, right?
@@ -38,7 +38,6 @@ int N_BLOCKS = 0; // set below
 const int HARDARE_MAX_X_BLOCKS = 1024;
 const int HARDWARE_MAX_THREADS_PER_BLOCK = 1024; // cannot exceed this many threads per block! For compute level 2.x and greater!
 
-
 typedef int op; // what type is the program primitives?
 
 typedef struct datum {
@@ -46,10 +45,12 @@ typedef struct datum {
     float y;
     float sd; // stdev of the output|input. 
 } datum;
-//          1     I   a  b   +      -       _      #      *      @      /    |     L    E    ^     p    V      P     R     S     A    T      G      B      A
-enum OPS { PONE, INV, A, B, PLUS, MINUS, RMINUS, CPLUS, TIMES, CTIMES, DIV, RDIV, LOG, EXP, POW, CPOW, RPOW, CRPOW, SQRT, SIN, ASIN, ATAN, GAMMA, BESSEL, ABS,     NOPS};
+
+//          1     I   a  b   +      -       _      #      *      @      /    |     L    E    ^     p    V      P     R     S     A    T      G      A
+enum OPS { PONE, INV, A, B, PLUS, MINUS, RMINUS, CPLUS, TIMES, CTIMES, DIV, RDIV, LOG, EXP, POW, CPOW, RPOW, CRPOW, SQRT, SIN, ASIN, ATAN, GAMMA,  ABS,     NOPS};
 const int SQR = -99; // if we want to remove some from OPS, use here so the code below doesn't break
-const char* PROGRAM_CODE = "1Iab+-_#*@/|LE^pVPRSATGBA"; // if we want to print a concise description of the program (mainly for debugging) These MUST be algined with OPS
+const int BESSEL = -98; // can't seem ot match to R
+const char* PROGRAM_CODE = "1Iab+-_#*@/|LE^pVPRSATGA"; // if we want to print a concise description of the program (mainly for debugging) These MUST be algined with OPS
 
 
 // -----------------------------------------------------------------------
@@ -75,8 +76,8 @@ const char* PROGRAM_CODE = "1Iab+-_#*@/|LE^pVPRSATGBA"; // if we want to print a
 // Numerics
 // -----------------------------------------------------------------------     
 
-#define is_valid(x) (isfinite(x) && (x!=CUDART_NAN_F))
-#define is_invalid(x) (!is_valid(x))
+#define is_valid(x) (!is_invalid(x))
+#define is_invalid(x) (isnan(x) || (!isfinite(x))) 
 
 #define PIf 3.141592653589 
  
@@ -277,10 +278,15 @@ __device__ float compute_likelihood(int N, int idx, op* P, float* C, datum* D, i
     for(int di=0;di<ndata;di++) {
         
         float fx = call(N, idx, P, C, D[di].x);
-        if(is_invalid(fx)) return -1.0/0.0; //-CUDART_INF_F;
+        if(is_invalid(fx)) return -CUDART_INF_F;
 	  
         float l = lnormalpdf(fx-D[di].y, D[di].sd);
-        if(is_invalid(l)) return -1.0/0.0;;//-CUDART_INF_F;
+        if(is_invalid(l)) return -CUDART_INF_F;
+        
+        // WHY DOESNT THIS GIVE DIFFERENT ANSWERS FOR BAD EQUATIONS?
+//         if( ! (abs(fx-D[di].y) < 50)) {
+//                 return -999;
+//         }
         
         ll += l;
     }
@@ -389,20 +395,19 @@ __device__ int is_descendant(int n, int k) {
     return 0;
 }
 
-__global__ void MH_simple_kernel(int N, op* P, float* C, datum* D, int ndata, int steps, float* prior, float* likelihood, int random_seed)
-{
-	const int idx = blockIdx.x * blockDim.x + threadIdx.x;
-	if(idx >= N) { return; }  // MUST have this or else all hell breaks loose
+__global__ void MH_simple_kernel(int N, op* P, float* C, datum* D, int ndata, int steps, float* prior, float* likelihood, int random_seed){
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if(idx >= N) { return; }  // MUST have this or else all hell breaks loose
 
     float current_prior = compute_prior(N, idx, P, C);
     float current_likelihood = compute_likelihood(N, idx, P, C, D, ndata);
     float current = current_prior + current_likelihood;
-    
+        
     // Two possibilities here. We could let everything do the same proposals (for all steps) in which case we don't
     // add idx. This makes them access the same memory, etc. Alternatively we could add idx and make them separate
     // doesn't seem to matter much for speed
-    // int rx = random_seed;     
-	int rx = random_seed + idx; // NOTE: We might want to call cuda_rand here once so that we don't have a bias from low seeds
+    // int rx = random_seed;     	
+    int rx = random_seed + idx; // NOTE: We might want to call cuda_rand here once so that we don't have a bias from low seeds
     
     op old_program[PROGRAM_LENGTH]; // store a buffer for the old program
     
@@ -411,17 +416,17 @@ __global__ void MH_simple_kernel(int N, op* P, float* C, datum* D, int ndata, in
 	    if( (mcmci & 0x1) == 0x1) { // propose to a structure every this often
                 int n;//0-indexed 
                 
-                if(current > -CUDART_INF_F){
-                    n = random_int(PROGRAM_LENGTH, RNG_ARGS); // pick a node to propose to, note that here 1 is the root (by tree logic)
+                if(is_invalid(current)){
+                   n = 0; // always propose to the root if we're terrible
                 } else {
-                    n = 0; // always propose to the root if we're terrible
+                   n = random_int(PROGRAM_LENGTH, RNG_ARGS); // pick a node to propose to, note that here 1 is the root (by tree logic)                 
                 }
-                                
+                                                
                 for(int i=n;i<PROGRAM_LENGTH;i++) {
                     
                     old_program[i] = P[idx+i*N]; // copy over
                     
-//                     now make a proposal to every descendant of n
+                    // now make a proposal to every descendant of n
                     if(is_descendant(n,i)) { // translate i into 1-based indexing used for binary tree encoding.
                         P[idx+i*N] = random_int(NOPS, RNG_ARGS);
                     }
@@ -432,18 +437,17 @@ __global__ void MH_simple_kernel(int N, op* P, float* C, datum* D, int ndata, in
                 float proposal_likelihood = compute_likelihood(N, idx, P, C, D, ndata);
                 float proposal = proposal_prior + proposal_likelihood;
                         
-                if((is_valid(proposal) && (proposal>current || random_float(RNG_ARGS) < expf(proposal-current))) || is_invalid(current)) {
+                if(is_valid(proposal) && (proposal>current || random_float(RNG_ARGS) < expf(proposal-current))) {
                     current = proposal; // store the updated posterior
                     current_likelihood = proposal_likelihood;
                     current_prior = proposal_prior;
                 } else {
                     
-                    // restore 
+                    //restore 
                     for(int i=n;i<PROGRAM_LENGTH;i++) { // TODO: Could be started at n?
                         P[idx+i*N] = old_program[i]; 
                     }
                 }
-
 		
 	    } 
         else { // propose to a constant otherwise
@@ -493,11 +497,11 @@ void string_dispatch( char* target, op o, const char* a, const char* b, const ch
             case A:     strcat(target, a); break;
             case B:     strcat(target, b); break;// need both since of how consts are passed in
             case PLUS:  strcat(target, "("); strcat(target, a); strcat(target, "+"); strcat(target, b); strcat(target, ")"); break;
-            case CPLUS:  strcat(target, "("); strcat(target, a); strcat(target, "+"); strcat(target, C); strcat(target, ")"); break;
+            case CPLUS: strcat(target, "("); strcat(target, a); strcat(target, "+"); strcat(target, C); strcat(target, ")"); break;
             case MINUS: strcat(target, "("); strcat(target, a); strcat(target, "-"); strcat(target, b); strcat(target, ")"); break;
             case RMINUS:strcat(target, "("); strcat(target, b); strcat(target, "-"); strcat(target, a); strcat(target, ")"); break;
             case TIMES: strcat(target, "("); strcat(target, b); strcat(target, "*"); strcat(target, a); strcat(target, ")"); break;
-            case CTIMES: strcat(target, "("); strcat(target, b); strcat(target, "*"); strcat(target, C); strcat(target, ")"); break;
+            case CTIMES:strcat(target, "("); strcat(target, a); strcat(target, "*"); strcat(target, C); strcat(target, ")"); break;
             case DIV:   strcat(target, "("); strcat(target, a); strcat(target, "/"); strcat(target, b); strcat(target, ")"); break;
             case RDIV:  strcat(target, "("); strcat(target, b); strcat(target, "/"); strcat(target, a); strcat(target, ")"); break;
             case LOG:   strcat(target, "log("); strcat(target, a); strcat(target, ")"); break;
@@ -580,7 +584,7 @@ int main(int argc, char** argv)
     int WHICH_GPU = 0;
     int FIRST_HALF_DATA = 0;
     int EVEN_HALF_DATA = 0;
-    float resample_threshold = 100.0; // hypotheses more than this far from the MAP get resampled every outer block
+    float resample_threshold = 10.0; // hypotheses more than this far from the MAP get resampled every outer block
     string in_file_path = "data.txt";
     string out_path = "out/";
     
