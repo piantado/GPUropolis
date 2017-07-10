@@ -216,10 +216,10 @@ vector<datum>* load_data_file(const char* datapath, int FIRST_HALF_DATA, int EVE
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 // define a template to fold any function over  
-template<class T> T fold(int N, int idx, op* P, data_t* C, T leaf, T dispatch(op,T,T,T,T) ) {
+template<class T> __device__ T program_fold(int N, int idx, op* P, data_t* C, T leaf, T dispatch(op,T,T,T) ) {
    T buf[PROGRAM_LENGTH+1]; // we'll waste one space here at the beginning to simplify everything else
     
-    for(int i=PROGRAM_LENGTH;i>=1;i--) { // start at the last node
+    for(int i=PROGRAM_LENGTH;i>=1;i--) { // start at the last node, but with +1 indexing
         int lidx = 2*i; // indices of the children, assuming 1-indexing
         int ridx = 2*i+1;
         
@@ -228,21 +228,21 @@ template<class T> T fold(int N, int idx, op* P, data_t* C, T leaf, T dispatch(op
             lvalue = leaf; // the default value at the base of the tree
             rvalue = leaf;
         } else {
-            lvalue = buf[lidx];s
+            lvalue = buf[lidx];
             rvalue = buf[ridx];
         }
         
-        buf[i] = dispatch(P[idx+(i-1)*N], x, lvalue, rvalue, C[idx+(i-1)*N]); // P[...-1] since P is zero-indexed
+        op o = P[idx+(i-1)*N];
+	
+        buf[i] = dispatch(o, lvalue, rvalue, C[idx+(i-1)*N]); // P[...-1] since P is zero-indexed
     }
     
-    return buf[1];/
+    return buf[1];
 }
-// __device__ 
-
 
 // TODO: Make inline
 // evaluat a single operation op on arguments a and b
-__device__ data_t dispatch(op o, data_t a, data_t b, data_t C) {
+__device__ data_t dispatch_eval(op o, data_t a, data_t b, data_t C) {
         switch(o) {
             case PONE:   return a + 1.0;
             case INV:    return fdividef(1.0,a);
@@ -275,29 +275,7 @@ __device__ data_t dispatch(op o, data_t a, data_t b, data_t C) {
 }
 
 __device__ data_t call(int N, int idx, op* P, data_t* C, data_t x) {
-    // start at the first non-leaves
-    data_t buf[PROGRAM_LENGTH+1]; // we'll waste one space here at the beginning to simplify everything else
-    
-    for(int i=PROGRAM_LENGTH;i>=1;i--) { // start at the last node
-        int lidx = 2*i; // indices of the children
-        int ridx = 2*i+1;
-        
-        data_t lvalue = 0.0;
-        data_t rvalue = 0.0;
-        
-        if(lidx > PROGRAM_LENGTH) {
-            lvalue = x; // the default value at the base of the tree
-            rvalue = x;
-        } else {
-            lvalue = buf[lidx];
-            rvalue = buf[ridx];
-        }
-        
-        buf[i] = dispatch(P[idx+(i-1)*N], lvalue, rvalue, C[idx+(i-1)*N]); // P[...-1] since P is zero-indexed
-    }
-    // now buf[1] stores the output, which is the top node
-    
-    return buf[1];
+  return program_fold<data_t>(N, idx, P, C, x, dispatch_eval);
 }
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -313,11 +291,6 @@ __device__ bayes_t compute_likelihood(int N, int idx, op* P, data_t* C, datum* D
 	  
         bayes_t l = lnormalpdf(fx-D[di].y, D[di].sd);
         if(is_invalid(l)) return -CUDART_INF_F;
-        
-        // WHY DOESNT THIS GIVE DIFFERENT ANSWERS FOR BAD EQUATIONS?
-//         if( ! (abs(fx-D[di].y) < 50)) {
-//                 return -999;
-//         }
         
         ll += l;
     }
@@ -364,35 +337,11 @@ __device__ float dispatch_length(op o, float a, float b) {
 
 
 __device__ bayes_t compute_prior(int N, int idx, op* P, data_t* C) {
-    
-    bayes_t len[PROGRAM_LENGTH+1]; // how long is the tree below? 
-    
-    for(int i=PROGRAM_LENGTH;i>=1;i--) { // start at the last node
-        int lidx = 2*i; // indices of the children
-        int ridx = 2*i+1;
-        
-        op o = P[idx+(i-1)*N];
-        
-        bayes_t lvalue, rvalue;
-        
-        if(lidx>PROGRAM_LENGTH) {
-            lvalue = X_LENGTH_PRIOR; // x has length 1
-        } else {
-            lvalue = len[lidx];
-        }
-        
-        if(ridx>PROGRAM_LENGTH) {
-            rvalue = X_LENGTH_PRIOR; // x has length 1
-        } else {
-            rvalue = len[ridx];
-        }
-        
-        
-        len[i] = dispatch_length(o, lvalue, rvalue);
-    }
-      
-    bayes_t prior = -PRIOR_MULTIPLIER * len[1]; // the total length at the top
-
+   
+    // call fold where the X_LENGTH_PRIOR is used for the leaves
+    float length = program_fold<float>(N, idx, P, C, X_LENGTH_PRIOR, dispatch_length);
+ 
+    bayes_t prior = -PRIOR_MULTIPLIER * length;
     for(int c=0;c<NCONSTANTS;c++) {
         prior += lcauchypdf(C[idx+c*N], CONSTANT_SCALE); // proportional to cauchy density
     }
