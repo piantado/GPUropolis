@@ -3,7 +3,8 @@
  *
  * Simple tree-regeneration on CUDA with coalesced memory access
  *     
- * TODO: Allow only constant functions if we want them?
+ * 	- I think we can do half as many constants, right?
+ * 	- Should we always scale x and y by some cauchy?
  */
 
 #include <stdio.h>
@@ -47,7 +48,7 @@ typedef struct datum {
 } datum;
 
 //          1     I   a  b   +      -       _      #      *      @      /    |     L    E    ^     p    V      P     R     S     A    T      G      A
-enum OPS { PONE, INV, A, B, PLUS, MINUS, RMINUS, CPLUS, TIMES, CTIMES, DIV, RDIV, LOG, EXP, POW, CPOW, RPOW, CRPOW, SQRT, SIN, ASIN, ATAN, GAMMA,  ABS,     NOPS};
+enum OPS { ONE, INV, A, B, PLUS, MINUS, RMINUS, CPLUS, TIMES, CTIMES, DIV, RDIV, LOG, EXP, POW, CPOW, RPOW, CRPOW, SQRT, SIN, ASIN, ATAN, GAMMA,  ABS,     NOPS};
 const int SQR = -99; // if we want to remove some from OPS, use here so the code below doesn't break
 const int BESSEL = -98; // can't seem ot match to R
 const char* PROGRAM_CODE = "1Iab+-_#*@/|LE^pVPRSATGA"; // if we want to print a concise description of the program (mainly for debugging) These MUST be algined with OPS
@@ -244,7 +245,7 @@ template<class T> __device__ T program_fold(int N, int idx, op* P, data_t* C, T 
 // evaluat a single operation op on arguments a and b
 __device__ data_t dispatch_eval(op o, data_t a, data_t b, data_t C) {
         switch(o) {
-            case PONE:   return a + 1.0;
+            case ONE:   return  1.0;
             case INV:    return fdividef(1.0,a);
             case A:      return a; 
             case B:      return b; // need both since of how consts are passed in
@@ -305,7 +306,7 @@ __device__ bayes_t compute_likelihood(int N, int idx, op* P, data_t* C, datum* D
 __device__ float dispatch_length(op o, float a, float b) {
     // count up the length for the prior
         switch(o) {
-            case PONE:   return 1+a;
+            case ONE:    return 1;
             case INV:    return 1+a;
             case A:      return a; 
             case B:      return b; // need both since of how consts are passed in
@@ -470,7 +471,7 @@ __global__ void MH_simple_kernel(int N, op* P, data_t* C, datum* D, int ndata, i
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 void string_dispatch( char* target, op o, const char* a, const char* b, const char* C) {
         switch(o) {
-            case PONE:  strcat(target, "(1+"); strcat(target, a); strcat(target, ")"); break;
+            case ONE:   strcat(target, "1"); break;
             case INV:   strcat(target, "(1/"); strcat(target, a); strcat(target, ")"); break;
             case A:     strcat(target, a); break;
             case B:     strcat(target, b); break;// need both since of how consts are passed in
@@ -710,12 +711,7 @@ int main(int argc, char** argv)
             fprintf(fp, "%d\t%d\t", h, o);
 	    
             fprintf(fp, "%.4f\t%.4f\t%.4f\t", host_prior[h]+host_likelihood[h], host_prior[h], host_likelihood[h]);
-//              
-// //             for(int c=0;c<PROGRAM_LENGTH;c++){ 
-// //                 fprintf(fp, "%d ", host_P[h+N*c]);
-// //             }
-// //             fprintf(fp, "\t\"");
-// 
+	    
             fprintf(fp, "\"");
             displaystring("C", N, h, host_P, host_C, fp);
             
