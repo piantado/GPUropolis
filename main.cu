@@ -3,8 +3,8 @@
  *
  * Simple tree-regeneration on CUDA with coalesced memory access
  *     
- * 	- I think we can do half as many constants, right?
- * 	- Should we always scale x and y by some cauchy?
+ * rename proposal, current
+ * 
  */
 
 #include <stdio.h>
@@ -20,14 +20,17 @@
 
 using namespace std;
 
-const float PRIOR_MULTIPLIER = 10.0; // prior is exp(-PRIOR_MULTIPLIER * length) 
+const float PRIOR_MULTIPLIER = 1.0; // prior is exp(-PRIOR_MULTIPLIER * length) 
 const float CONST_LENGTH_PRIOR = 1.0; // how much do constants cost in terms of length?
 const float X_LENGTH_PRIOR = 1.0; // how much does X cost in terms of length?
 
-const int PROGRAM_LENGTH = 15; // how many operations do we allow?
-const int NCONSTANTS     = 15; 
+const int PROGRAM_LENGTH = 15; // how many operations do we allow? This is the max index of the program array. 
+const int NCONSTANTS     = 15; // each op may use a constant if it wants (but most do not)
 
-const float CONSTANT_SCALE = 10.0; // Maybe set to be the SD of the y values, fucntions as a scale over the constants in teh prior, proprosals
+const float CONSTANT_SCALE = 100.0; // Scales the constants in the prior
+
+const float resample_threshold = 10.0; // hypotheses more than this far from the MAP get resampled every outer block
+
 
 // Setup for gpu hardware 
 const int BLOCK_SIZE = 128;
@@ -47,11 +50,14 @@ typedef struct datum {
     data_t sd; // stdev of the output|input. 
 } datum;
 
-//          1     I   a  b   +      -       _      #      *      @      /    |     L    E    ^     p    V      P     R     S     A    T      G      A
-enum OPS { ONE, INV, A, B, PLUS, MINUS, RMINUS, CPLUS, TIMES, CTIMES, DIV, RDIV, LOG, EXP, POW, CPOW, RPOW, CRPOW, SQRT, SIN, ASIN, ATAN, GAMMA,  ABS,     NOPS};
-const int SQR = -99; // if we want to remove some from OPS, use here so the code below doesn't break
-const int BESSEL = -98; // can't seem ot match to R
-const char* PROGRAM_CODE = "1Iab+-_#*@/|LE^pVPRSATGA"; // if we want to print a concise description of the program (mainly for debugging) These MUST be algined with OPS
+//          1     I   a  b   +      -       _     #      *      @      /    |     L    E    ^     p    V      P     R     S     A    T      G      A
+// enum OPS { ONE, INV, A, B, PLUS, MINUS, RMINUS, CPLUS, TIMES, CTIMES, DIV, RDIV, LOG, EXP, POW, CPOW, RPOW, CRPOW, SQRT, SIN, ASIN, ATAN, GAMMA,  ABS,     NOPS};
+// enum UNUSED_OPS { SQR=-999, BESSEL};
+// const char* PROGRAM_CODE = "1Iab+-_#*@/|LE^pVPRSATGA"; // if we want to print a concise description of the program (mainly for debugging) These MUST be algined with OPS
+
+enum OPS { ONE, INV, A, B, PLUS, MINUS, RMINUS, CPLUS, TIMES, CTIMES, DIV, RDIV, LOG, EXP, POW, CPOW, RPOW, CRPOW, SQRT,  NOPS};
+enum UNUSED_OPS { SQR=-999, BESSEL,SIN, ASIN, ATAN, GAMMA,ABS};
+const char* PROGRAM_CODE = "1Iab+-_#*@/|LE^pVPR"; // if we want to print a concise description of the program (mainly for debugging) These MUST be algined with OPS
 
 
 // -----------------------------------------------------------------------
@@ -303,8 +309,9 @@ __device__ bayes_t compute_likelihood(int N, int idx, op* P, data_t* C, datum* D
 // Compute the prior
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-__device__ float dispatch_length(op o, float a, float b) {
+__device__ float dispatch_length(op o, float a, float b, float c__unusued) {
     // count up the length for the prior
+    // c is unused
         switch(o) {
             case ONE:    return 1;
             case INV:    return 1+a;
@@ -342,7 +349,9 @@ __device__ bayes_t compute_prior(int N, int idx, op* P, data_t* C) {
     // call fold where the X_LENGTH_PRIOR is used for the leaves
     float length = program_fold<float>(N, idx, P, C, X_LENGTH_PRIOR, dispatch_length);
  
-    bayes_t prior = -PRIOR_MULTIPLIER * length;
+    // the prior is going to be (1/NOPS)**(PRIOR_MULTIPLIER * LENGTH)
+    
+    bayes_t prior = -PRIOR_MULTIPLIER * length * NOPS;
     for(int c=0;c<NCONSTANTS;c++) {
         prior += lcauchypdf(C[idx+c*N], CONSTANT_SCALE); // proportional to cauchy density
     }
@@ -563,7 +572,6 @@ int main(int argc, char** argv)
     int WHICH_GPU = 0;
     int FIRST_HALF_DATA = 0;
     int EVEN_HALF_DATA = 0;
-    float resample_threshold = 10.0; // hypotheses more than this far from the MAP get resampled every outer block
     string in_file_path = "data.txt";
     string out_path = "out/";
     
@@ -768,7 +776,8 @@ int main(int argc, char** argv)
     // -----------------------------------------------------------------------
     // Cleanup
     // -----------------------------------------------------------------------
-    fprintf(stderr, " Completed. \n");
+    
+    fprintf(stderr, " Completed, cleaning up. \n");
     
     delete[] host_P;
     delete[] host_C;
