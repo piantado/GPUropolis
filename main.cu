@@ -156,7 +156,7 @@ __device__ __host__ float lcauchypdf( float x, float s ){
     return -logf(PIf) - logf(s) - logf(1.0+x*x/s);
 }
 
-int rand_lim(int limit) {
+int random_int_host(int limit) {
 //  from http://stackoverflow.com/questions/2999075/generate-a-random-number-within-range/2999130#2999130
 //   return a random number between 0 and limit inclusive.
  
@@ -556,6 +556,7 @@ static struct option long_options[] =
         {"N",            required_argument,    NULL, 'N'},
         {"out",          required_argument,    NULL, 'O'},
         {"outer",        required_argument,    NULL, 'o'},
+        {"thin",         required_argument,    NULL, 't'},
         {"seed",         required_argument,    NULL, 's'},
         {"burn",         required_argument,    NULL, 'b'},
         {"gpu",          required_argument,    NULL, 'g'},
@@ -572,8 +573,9 @@ int main(int argc, char** argv)
     int N = 10000;
     int steps = 1000;
     int outer = 100;
+    int thin = 1; // how many outer blocks to skip?
     int seed = -1;
-//     int burn = 10;
+    int burn = 0;
     int WHICH_GPU = 0;
     int FIRST_HALF_DATA = 0;
     int EVEN_HALF_DATA = 0;
@@ -592,7 +594,8 @@ int main(int argc, char** argv)
             case 'N': N = atoi(optarg); break;
             case 'o': outer = atoi(optarg); break;
             case 'O': out_path = optarg; break;
-//             case 'b': BURN_BLOCKS = atoi(optarg); break;
+            case 't': thin = atoi(optarg); break;
+            case 'b': burn = atoi(optarg); break;
             case 'g': WHICH_GPU = atoi(optarg); break;
             case 's': seed = (float)atof(optarg); break;
             case 'f': FIRST_HALF_DATA = 1; break;
@@ -674,6 +677,7 @@ int main(int argc, char** argv)
     fprintf(fp, "# -----------------------------------------------------------------\n");
     for(int i=0;i<ndata;i++) 
         fprintf(fp, "# %f\t%f\t%f\n", host_D[i].x, host_D[i].y, host_D[i].sd);
+    fprintf(fp, "#\n#\n");
     fclose(fp);
     
     // -----------------------------------------------------------------------
@@ -686,9 +690,9 @@ int main(int argc, char** argv)
     bayes_t* host_likelihood =  new bayes_t[N]; 
     
 
-    for(int i=0;i<PROGRAM_LENGTH*N;i++) host_P[i] = rand_lim(NOPS-1);
+    for(int i=0;i<PROGRAM_LENGTH*N;i++) host_P[i] = random_int_host(NOPS-1);
     for(int i=0;i<NCONSTANTS*N;i++)    {
-        int order = rand_lim(C_MAX_ORDER+C_MIN_ORDER)-C_MIN_ORDER; 
+        int order = random_int_host(C_MAX_ORDER+C_MIN_ORDER)-C_MIN_ORDER; 
         host_C[i] = CONSTANT_SCALE * powf(10.0,order) * random_normal();
     }
         
@@ -722,34 +726,36 @@ int main(int argc, char** argv)
         cudaMemcpy(host_likelihood, device_likelihood, N*sizeof(bayes_t), cudaMemcpyDeviceToHost); CUDA_CHECK();
         cudaDeviceSynchronize(); // wait for preceedings requests to finish
         
-        // and now print
-        fp = fopen(SAMPLE_PATH.c_str(), "a");
-        for(int h=0;h<N;h++) {
-            fprintf(fp, "%d\t%d\t", h, o);
-	    
-            fprintf(fp, "%.4f\t%.4f\t%.4f\t", host_prior[h]+host_likelihood[h], host_prior[h], host_likelihood[h]);
-	    
-            fprintf(fp, "\"");
-            displaystring("C", N, h, host_P, host_C, fp);
-            
-            fprintf(fp, "\"\t\"");
-            
-            displaystring("%.4f", N, h, host_P, host_C, fp);
-            fprintf(fp, "\"\t\"");
-            
-            for(int i=0;i<PROGRAM_LENGTH;i++) {
-                fprintf(fp, "%c", PROGRAM_CODE[host_P[h+N*i]]);
+        // print every thin samples
+        if(o>burn && o%thin == 0) {
+            // and now print
+            fp = fopen(SAMPLE_PATH.c_str(), "a");
+            for(int h=0;h<N;h++) {
+                fprintf(fp, "%d\t%d\t", h, o);
+                
+                fprintf(fp, "%.4f\t%.4f\t%.4f\t", host_prior[h]+host_likelihood[h], host_prior[h], host_likelihood[h]);
+                
+                fprintf(fp, "\"");
+                displaystring("C", N, h, host_P, host_C, fp);
+                
+                fprintf(fp, "\"\t\"");
+                
+                displaystring("%.4f", N, h, host_P, host_C, fp);
+                fprintf(fp, "\"\t\"");
+                
+                for(int i=0;i<PROGRAM_LENGTH;i++) {
+                    fprintf(fp, "%c", PROGRAM_CODE[host_P[h+N*i]]);
+                }
+                fprintf(fp, "\"\t\t");
+                
+                for(int c=0;c<NCONSTANTS;c++){ 
+                    fprintf(fp, "%.2f\t", host_C[h+N*c]);
+                }
+                
+                fprintf(fp, "\n");            
             }
-            fprintf(fp, "\"\t\t");
-            
-            for(int c=0;c<NCONSTANTS;c++){ 
-                fprintf(fp, "%.2f\t", host_C[h+N*c]);
-            }
-            
-            fprintf(fp, "\n");
-//             
+            fclose(fp);
         }
-        fclose(fp);
         
         // find the MAP so far
         bayes_t map_so_far = -9e99;
@@ -762,9 +768,9 @@ int main(int argc, char** argv)
         for(int h=0;h<N;h++) {
             if(host_prior[h]+host_likelihood[h] < map_so_far - resample_threshold) {
                 // randomize
-                for(int i=0;i<PROGRAM_LENGTH;i++) host_P[h+i*N] = rand_lim(NOPS-1);
+                for(int i=0;i<PROGRAM_LENGTH;i++) host_P[h+i*N] = random_int_host(NOPS-1);
                 for(int i=0;i<NCONSTANTS;i++)   {
-                    int order = rand_lim(C_MAX_ORDER+C_MIN_ORDER)-C_MIN_ORDER; 
+                    int order = random_int_host(C_MAX_ORDER+C_MIN_ORDER)-C_MIN_ORDER; 
                     host_C[h+i*N] = CONSTANT_SCALE * powf(10.0,order) * random_normal();    
                 }
             }
