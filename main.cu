@@ -27,9 +27,11 @@ const float X_LENGTH_PRIOR = 1.0; // how much does X cost in terms of length?
 const int PROGRAM_LENGTH = 15; // how many operations do we allow? This is the max index of the program array. 
 const int NCONSTANTS     = 15; // each op may use a constant if it wants (but most do not)
 
-const float CONSTANT_SCALE = 100.0; // Scales the constants in the prior
+const float CONSTANT_SCALE = 1.0; // Scales the constants in the prior
+const int C_MAX_ORDER = 5; //  constants are chosen with scales between 10^C_MIN_ORDER and 10^C_MAX_ORDER
+const int C_MIN_ORDER = -2; 
 
-const float resample_threshold = 10.0; // hypotheses more than this far from the MAP get resampled every outer block
+const float resample_threshold = 25.0; // hypotheses more than this far from the MAP get resampled every outer block
 
 
 // Setup for gpu hardware 
@@ -56,7 +58,7 @@ typedef struct datum {
 // const char* PROGRAM_CODE = "1Iab+-_#*@/|LE^pVPRSATGA"; // if we want to print a concise description of the program (mainly for debugging) These MUST be algined with OPS
 
 enum OPS { ONE, INV, A, B, PLUS, MINUS, RMINUS, CPLUS, TIMES, CTIMES, DIV, RDIV, LOG, EXP, POW, CPOW, RPOW, CRPOW, SQRT,  NOPS};
-enum UNUSED_OPS { SQR=-999, BESSEL,SIN, ASIN, ATAN, GAMMA,ABS};
+enum UNUSED_OPS { SQR=-999, BESSEL,SIN, ASIN, ATAN, GAMMA, ABS};
 const char* PROGRAM_CODE = "1Iab+-_#*@/|LE^pVPR"; // if we want to print a concise description of the program (mainly for debugging) These MUST be algined with OPS
 
 
@@ -398,10 +400,11 @@ __global__ void MH_simple_kernel(int N, op* P, data_t* C, datum* D, int ndata, i
     int rx = random_seed + idx; // NOTE: We might want to call cuda_rand here once so that we don't have a bias from low seeds
     
     op old_program[PROGRAM_LENGTH]; // store a buffer for the old program
+    data_t old_C[NCONSTANTS]; 
     
 	for(int mcmci=0;mcmci<steps;mcmci++) {
         
-	    if( (mcmci & 0x1) == 0x1) { // propose to a structure every this often
+	    if( mcmci % 5 == 0) { // propose to a structure every this often
                 int n;//0-indexed 
                 
                 if(is_invalid(current)){
@@ -437,32 +440,34 @@ __global__ void MH_simple_kernel(int N, op* P, data_t* C, datum* D, int ndata, i
                     }
                 }
 		
-	    } 
+        } 
         else { // propose to a constant otherwise
-                
-                int i = idx + N*random_int(NCONSTANTS, RNG_ARGS);
-                data_t old = C[i];
-                
-                // choose what kind of proposal
-                if(random_int(2,RNG_ARGS) == 0){
-                    C[i] = C[i] + CONSTANT_SCALE*random_normal(RNG_ARGS); 
-                } else {
-                    C[i] = C[i] + CONSTANT_SCALE*random_cauchy(RNG_ARGS); 
+
+            // In this version, we propose to all constants, but with varying scales
+            for(int c=0;c<NCONSTANTS;c++) {
+                int i = idx+N*c;  
+                old_C[c] = C[i];
+            
+                int order = random_int(C_MAX_ORDER+C_MIN_ORDER,RNG_ARGS)-C_MIN_ORDER; // what order of magnitude?
+                C[i] = C[i] + CONSTANT_SCALE * powf(10.0,order) * random_normal(RNG_ARGS);                   
+            }
+            
+            bayes_t proposal_prior = compute_prior(N, idx, P, C);
+            bayes_t proposal_likelihood = compute_likelihood(N, idx, P, C, D, ndata);
+            bayes_t proposal = proposal_prior + proposal_likelihood;
+                    
+            if((is_valid(proposal) && (proposal>current || random_float(RNG_ARGS) < expf(proposal-current))) || is_invalid(current)) {
+                current = proposal; // store the updated posterior
+                current_likelihood = proposal_likelihood;
+                current_prior = proposal_prior;
+            } else {
+                for(int c=0;c<NCONSTANTS;c++) {
+                    int i = idx+N*c;  
+                    C[i] = old_C[c];
                 }
-                // TODO: Maybe make proposals relative to the size of the constant?
-                
-                bayes_t proposal_prior = compute_prior(N, idx, P, C);
-                bayes_t proposal_likelihood = compute_likelihood(N, idx, P, C, D, ndata);
-                bayes_t proposal = proposal_prior + proposal_likelihood;
-                        
-                if((is_valid(proposal) && (proposal>current || random_float(RNG_ARGS) < expf(proposal-current))) || is_invalid(current)) {
-                    current = proposal; // store the updated posterior
-                    current_likelihood = proposal_likelihood;
-                    current_prior = proposal_prior;
-                } else {
-                    C[i] = old; // restore the old version
-                }
-                
+            }
+            
+            
 		
 	    }
 //           
@@ -682,7 +687,11 @@ int main(int argc, char** argv)
     
 
     for(int i=0;i<PROGRAM_LENGTH*N;i++) host_P[i] = rand_lim(NOPS-1);
-    for(int i=0;i<NCONSTANTS*N;i++)     host_C[i] = CONSTANT_SCALE*random_cauchy();
+    for(int i=0;i<NCONSTANTS*N;i++)    {
+        int order = rand_lim(C_MAX_ORDER+C_MIN_ORDER)-C_MIN_ORDER; 
+        host_C[i] = CONSTANT_SCALE * powf(10.0,order) * random_normal();
+    }
+        
     
     
     // -----------------------------------------------------------------------
@@ -754,7 +763,10 @@ int main(int argc, char** argv)
             if(host_prior[h]+host_likelihood[h] < map_so_far - resample_threshold) {
                 // randomize
                 for(int i=0;i<PROGRAM_LENGTH;i++) host_P[h+i*N] = rand_lim(NOPS-1);
-                for(int i=0;i<NCONSTANTS;i++)     host_C[h+i*N] = CONSTANT_SCALE*random_cauchy();
+                for(int i=0;i<NCONSTANTS;i++)   {
+                    int order = rand_lim(C_MAX_ORDER+C_MIN_ORDER)-C_MIN_ORDER; 
+                    host_C[h+i*N] = CONSTANT_SCALE * powf(10.0,order) * random_normal();    
+                }
             }
         }
         // and copy back 
