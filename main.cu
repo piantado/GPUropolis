@@ -7,7 +7,7 @@
  * change power of 10 to power of 2, for speed
  * 
  */
-
+#include <assert.h>
 #include <stdio.h>
 #include <time.h>
 #include <stdlib.h>
@@ -22,15 +22,15 @@
 using namespace std;
 
 const float PRIOR_MULTIPLIER = 1.0; // prior is exp(-PRIOR_MULTIPLIER * length) 
-const float CONST_LENGTH_PRIOR = 0.0; // how much do constants cost in terms of length?
-const float X_LENGTH_PRIOR = 0.0; // how much does X cost in terms of length?
+const float CONST_LENGTH_PRIOR = 1.0; // how much do constants cost in terms of length?
+const float X_LENGTH_PRIOR = 1.0; // how much does X cost in terms of length?
 
 const int PROGRAM_LENGTH = 15; // how many operations do we allow? This is the max index of the program array. 
 const int NCONSTANTS     = 15; // each op may use a constant if it wants (but most do not)
 
 const float CONSTANT_SCALE = 1.0; // Scales the constants in the prior
-const int C_MAX_ORDER = 5; //  constants are chosen with scales between 10^C_MIN_ORDER and 10^C_MAX_ORDER
-const int C_MIN_ORDER = -2; 
+const int C_MAX_ORDER = 4; //  constants are chosen with scales between 10^C_MIN_ORDER and 10^C_MAX_ORDER
+const int C_MIN_ORDER = -4; 
 
 const float resample_threshold = 10.0; // hypotheses more than this far from the MAP get resampled every outer block
 
@@ -43,7 +43,7 @@ const int HARDWARE_MAX_THREADS_PER_BLOCK = 1024; // cannot exceed this many thre
 /* Define a few types so that we can change precision if we need to */
 typedef int op; // what type is the program primitives?
 typedef float data_t; // the type of the data we read and operate on in the program
-typedef float bayes_t; // when we compute Bayesian things (priors, likelihoods, etc.) what type do we use?
+typedef double bayes_t; // when we compute Bayesian things (priors, likelihoods, etc.) what type do we use?
 
 /* A structure to hold data: x,y,stdev pairs */
 typedef struct datum {
@@ -57,10 +57,21 @@ enum OPS { ONE, INV, A, B, PLUS, MINUS, RMINUS, CPLUS, TIMES, CTIMES, DIV, RDIV,
 enum UNUSED_OPS { BESSEL=-999};
 const char* PROGRAM_CODE = "1Iab+-_#*@/|LE^pVPRSATGA2"; // if we want to print a concise description of the program (mainly for debugging) These MUST be algined with OPS
 
-// enum OPS { ONE, INV, A, B, PLUS, MINUS, RMINUS, CPLUS, TIMES, CTIMES, DIV, RDIV, LOG, EXP, POW, CPOW, RPOW, CRPOW, SQRT,  NOPS};
-// enum UNUSED_OPS { SQR=-999, BESSEL,SIN, ASIN, ATAN, GAMMA, ABS};
-// const char* PROGRAM_CODE = "1Iab+-_#*@/|LE^pVPR"; // if we want to print a concise description of the program (mainly for debugging) These MUST be algined with OPS
-
+// Command line arguments that get set below (these give default values)
+data_t sdscale = 1.0; // scale the SDs by this
+int N = 10000;
+int steps = 1000;
+int outer = 100;
+int thin = 1; // how many outer blocks to skip?
+int seed = -1;
+int burn = 0;
+//     int quiet = 0; 
+int WHICH_GPU = 0;
+int FIRST_HALF_DATA = 0;
+int EVEN_HALF_DATA = 0;
+string in_file_path = "data.txt";
+string out_path = "out/";
+    
 
 // -----------------------------------------------------------------------
 // Memory Macros
@@ -148,24 +159,24 @@ float random_cauchy() {
     return u/v;
 }
    
-__device__ __host__ float lnormalpdf( float x, float s ){
+__device__ __host__ bayes_t lnormalpdf( float x, float s ){
     return -(x*x)/(2.0*s*s) - 0.5 * (logf(2.0*PIf) + 2.0*logf(s));
 }
 
-__device__ __host__ float lcauchypdf( float x, float s ){
+__device__ __host__ bayes_t lcauchypdf( float x, float s ){
     return -logf(PIf) - logf(s) - logf(1.0+x*x/s);
 }
 
 int random_int_host(int limit) {
 //  from http://stackoverflow.com/questions/2999075/generate-a-random-number-within-range/2999130#2999130
-//   return a random number between 0 and limit inclusive.
+//   return a random number [0,limit).
  
-    int divisor = RAND_MAX/(limit+1);
+    int divisor = RAND_MAX/(limit);
     int retval;
 
     do { 
         retval = rand() / divisor;
-    } while (retval > limit);
+    } while (retval > limit-1);
 
     return retval;
 }
@@ -187,10 +198,12 @@ vector<datum>* load_data_file(const char* datapath, int FIRST_HALF_DATA, int EVE
 	while( getline(&line, &len, fp) != -1) {
 		if( line[0] == '#' ) continue;  // skip comments
 		else if (sscanf(line, "%f\t%f\t%f\n", &x, &y, &sd) == 3) { // floats
+                        sd = sdscale*sd;
 			d->push_back( (datum){.x=(data_t)x, .y=(data_t)y, .sd=(data_t)sd} );
                         assert((data_t)sd > 0.0);
 		}
 		else if (sscanf(line, "%e\t%e\t%e\n", &x, &y, &sd) == 3) { // scientific notation
+                        sd = sdscale*sd;
 			d->push_back( (datum){.x=(data_t)x, .y=(data_t)y, .sd=(data_t)sd} );
                         assert((data_t)sd > 0.0);
 		}
@@ -355,27 +368,8 @@ __device__ bayes_t compute_prior(int N, int idx, op* P, data_t* C) {
     
     bayes_t prior = -PRIOR_MULTIPLIER * length * NOPS;
     for(int c=0;c<NCONSTANTS;c++) {
-//         prior += lcauchypdf(C[idx+c*N], CONSTANT_SCALE); // proportional to cauchy density
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        prior += lnormalpdf(C[idx+c*N], CONSTANT_SCALE);
+        prior += lcauchypdf(C[idx+c*N], CONSTANT_SCALE); // proportional to cauchy density
+//         prior += lnormalpdf(C[idx+c*N], CONSTANT_SCALE);
     }
     
     return prior;
@@ -420,7 +414,7 @@ __global__ void MH_simple_kernel(int N, op* P, data_t* C, datum* D, int ndata, i
     int rx = random_seed + idx; // NOTE: We might want to call cuda_rand here once so that we don't have a bias from low seeds
     
     op old_program[PROGRAM_LENGTH]; // store a buffer for the old program
-    data_t old_C[NCONSTANTS]; 
+    data_t old_C[NCONSTANTS];       // and old constants
     
 	for(int mcmci=0;mcmci<steps;mcmci++) {
         
@@ -469,7 +463,6 @@ __global__ void MH_simple_kernel(int N, op* P, data_t* C, datum* D, int ndata, i
                 old_C[c] = C[i];
             
                 int order = random_int(C_MAX_ORDER-C_MIN_ORDER,RNG_ARGS)+C_MIN_ORDER; // what order of magnitude?
-//                 int order=0;
                 C[i] = C[i] + CONSTANT_SCALE * powf(10.0,order) * random_normal(RNG_ARGS);                   
             }
             
@@ -490,7 +483,7 @@ __global__ void MH_simple_kernel(int N, op* P, data_t* C, datum* D, int ndata, i
             
             
 		
-	    }
+        }
 //           
       } // end mcmc loop
 	
@@ -539,7 +532,7 @@ void string_dispatch( char* target, op o, const char* a, const char* b, const ch
 char buf[2*PROGRAM_LENGTH+2][1000]; 
 char lbuf[100], rbuf[100];
 char cbuf[100];
-void displaystring(const char* const_format, int N, int idx, op* P, float* C, FILE* fp){
+void displaystring(const char* const_format, int N, int idx, op* P, data_t* C, FILE* fp){
 
     for(int i=PROGRAM_LENGTH;i>=1;i--) { // start at the last node
         int lidx = 2*i; // indices of the children
@@ -581,8 +574,10 @@ static struct option long_options[] =
         {"seed",         required_argument,    NULL, 's'},
         {"burn",         required_argument,    NULL, 'b'},
         {"gpu",          required_argument,    NULL, 'g'},
+        {"sdscale",      required_argument,    NULL, 'r'},
         {"first-half",   no_argument,    NULL, 'f'},
         {"even-half",    no_argument,    NULL, 'e'},
+        
 //         {"quiet",        no_argument,    NULL, 'q'},
         {"all",    no_argument,    NULL, '_'},
         {NULL, 0, 0, 0} // zero row for bad arguments
@@ -590,20 +585,6 @@ static struct option long_options[] =
 
 int main(int argc, char** argv)
 {   
-    
-    /// default parameters
-    int N = 10000;
-    int steps = 1000;
-    int outer = 100;
-    int thin = 1; // how many outer blocks to skip?
-    int seed = -1;
-    int burn = 0;
-//     int quiet = 0; 
-    int WHICH_GPU = 0;
-    int FIRST_HALF_DATA = 0;
-    int EVEN_HALF_DATA = 0;
-    string in_file_path = "data.txt";
-    string out_path = "out/";
     
     // ----------------------------------------------------------------------------
     // Parse command line
@@ -620,7 +601,8 @@ int main(int argc, char** argv)
             case 't': thin = atoi(optarg); break;
             case 'b': burn = atoi(optarg); break;
             case 'g': WHICH_GPU = atoi(optarg); break;
-            case 's': seed = (float)atof(optarg); break;
+            case 's': seed = atoi(optarg); break;
+            case 'r': sdscale = (float)atof(optarg); break;
             case 'f': FIRST_HALF_DATA = 1; break;
             case 'e': EVEN_HALF_DATA = 1; break;
 //             case 'q': quiet = 1; break;
@@ -628,6 +610,17 @@ int main(int argc, char** argv)
             
             default: return 1; // unspecified
         }
+    
+    // -----------------------------------------------------------------------
+    // Check a few things
+    // -----------------------------------------------------------------------
+    
+    assert(strlen(PROGRAM_CODE) == NOPS);
+    assert(PROGRAM_LENGTH == NCONSTANTS);
+    assert(steps>0);
+    assert(N>0);
+    assert(burn>=0);
+    assert(thin>=1);
     
     // -----------------------------------------------------------------------
     // Initialize the GPU
@@ -681,7 +674,7 @@ int main(int argc, char** argv)
     fprintf(fp, "# \tBlocks: %i\n", outer);
 //     fprintf(fp, "\tBurn Blocks: %i\n", BURN_BLOCKS);
     fprintf(fp, "# \tN chains: %i\n", N);
-    fprintf(fp, "# \tseed: %i\n", seed);
+    fprintf(fp, "# \tSeed: %i\n", seed);
     fprintf(fp, "# \tMax program length: %i\n", PROGRAM_LENGTH);
     fprintf(fp, "# \tN Constants: %i\n", NCONSTANTS);
     fprintf(fp, "#\n#\n");
@@ -754,14 +747,14 @@ int main(int argc, char** argv)
             for(int h=0;h<N;h++) {
                 fprintf(fp, "%d\t%d\t", h, o);
                 
-                fprintf(fp, "%.4f\t%.4f\t%.4f\t", host_prior[h]+host_likelihood[h], host_prior[h], host_likelihood[h]);
+                fprintf(fp, "%.5f\t%.5f\t%.5f\t", host_prior[h]+host_likelihood[h], host_prior[h], host_likelihood[h]);
                 
                 fprintf(fp, "\"");
                 displaystring("C", N, h, host_P, host_C, fp);
                 
                 fprintf(fp, "\"\t\"");
                 
-                displaystring("%.4f", N, h, host_P, host_C, fp);
+                displaystring("%.10f", N, h, host_P, host_C, fp);
                 fprintf(fp, "\"\t\"");
                 
                 for(int i=0;i<PROGRAM_LENGTH;i++) {
@@ -770,7 +763,7 @@ int main(int argc, char** argv)
                 fprintf(fp, "\"\t\t");
                 
                 for(int c=0;c<NCONSTANTS;c++){ 
-                    fprintf(fp, "%.2f\t", host_C[h+N*c]);
+                    fprintf(fp, "%.10f\t", host_C[h+N*c]);
                 }
                 
                 fprintf(fp, "\n");            
