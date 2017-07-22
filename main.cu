@@ -1,9 +1,10 @@
 /*
- * GPUropolis - 2017 March 10 - Steve Piantadosi 
+ * GPUropolis - 2017 June 20 - Steve Piantadosi 
  *
  * Simple tree-regeneration on CUDA with coalesced memory access
  *     
  * rename proposal, current
+ * change power of 10 to power of 2, for speed
  * 
  */
 
@@ -21,8 +22,8 @@
 using namespace std;
 
 const float PRIOR_MULTIPLIER = 1.0; // prior is exp(-PRIOR_MULTIPLIER * length) 
-const float CONST_LENGTH_PRIOR = 1.0; // how much do constants cost in terms of length?
-const float X_LENGTH_PRIOR = 1.0; // how much does X cost in terms of length?
+const float CONST_LENGTH_PRIOR = 0.0; // how much do constants cost in terms of length?
+const float X_LENGTH_PRIOR = 0.0; // how much does X cost in terms of length?
 
 const int PROGRAM_LENGTH = 15; // how many operations do we allow? This is the max index of the program array. 
 const int NCONSTANTS     = 15; // each op may use a constant if it wants (but most do not)
@@ -31,8 +32,7 @@ const float CONSTANT_SCALE = 1.0; // Scales the constants in the prior
 const int C_MAX_ORDER = 5; //  constants are chosen with scales between 10^C_MIN_ORDER and 10^C_MAX_ORDER
 const int C_MIN_ORDER = -2; 
 
-const float resample_threshold = 25.0; // hypotheses more than this far from the MAP get resampled every outer block
-
+const float resample_threshold = 10.0; // hypotheses more than this far from the MAP get resampled every outer block
 
 // Setup for gpu hardware 
 const int BLOCK_SIZE = 128;
@@ -52,14 +52,14 @@ typedef struct datum {
     data_t sd; // stdev of the output|input. 
 } datum;
 
-//          1     I   a  b   +      -       _     #      *      @      /    |     L    E    ^     p    V      P     R     S     A    T      G      A
-// enum OPS { ONE, INV, A, B, PLUS, MINUS, RMINUS, CPLUS, TIMES, CTIMES, DIV, RDIV, LOG, EXP, POW, CPOW, RPOW, CRPOW, SQRT, SIN, ASIN, ATAN, GAMMA,  ABS,     NOPS};
-// enum UNUSED_OPS { SQR=-999, BESSEL};
-// const char* PROGRAM_CODE = "1Iab+-_#*@/|LE^pVPRSATGA"; // if we want to print a concise description of the program (mainly for debugging) These MUST be algined with OPS
+//          1     I   a  b   +      -       _     #      *      @      /    |     L    E    ^     p    V      P     R     S     A    T      G      A    2
+enum OPS { ONE, INV, A, B, PLUS, MINUS, RMINUS, CPLUS, TIMES, CTIMES, DIV, RDIV, LOG, EXP, POW, CPOW, RPOW, CRPOW, SQRT, SIN, ASIN, ATAN, GAMMA,  ABS, SQR,    NOPS};
+enum UNUSED_OPS { BESSEL=-999};
+const char* PROGRAM_CODE = "1Iab+-_#*@/|LE^pVPRSATGA2"; // if we want to print a concise description of the program (mainly for debugging) These MUST be algined with OPS
 
-enum OPS { ONE, INV, A, B, PLUS, MINUS, RMINUS, CPLUS, TIMES, CTIMES, DIV, RDIV, LOG, EXP, POW, CPOW, RPOW, CRPOW, SQRT,  NOPS};
-enum UNUSED_OPS { SQR=-999, BESSEL,SIN, ASIN, ATAN, GAMMA, ABS};
-const char* PROGRAM_CODE = "1Iab+-_#*@/|LE^pVPR"; // if we want to print a concise description of the program (mainly for debugging) These MUST be algined with OPS
+// enum OPS { ONE, INV, A, B, PLUS, MINUS, RMINUS, CPLUS, TIMES, CTIMES, DIV, RDIV, LOG, EXP, POW, CPOW, RPOW, CRPOW, SQRT,  NOPS};
+// enum UNUSED_OPS { SQR=-999, BESSEL,SIN, ASIN, ATAN, GAMMA, ABS};
+// const char* PROGRAM_CODE = "1Iab+-_#*@/|LE^pVPR"; // if we want to print a concise description of the program (mainly for debugging) These MUST be algined with OPS
 
 
 // -----------------------------------------------------------------------
@@ -206,15 +206,15 @@ vector<datum>* load_data_file(const char* datapath, int FIRST_HALF_DATA, int EVE
 	
 	// Trim the data based on first/second half or even odd
 	if(FIRST_HALF_DATA){
-		int mid = d->size()/2;
-		for(int i=d->size()-1;i>=mid;i--) {
-			d->erase(d->begin()+i);
-		}
+            int mid = d->size()/2;
+            for(int i=d->size()-1;i>=mid;i--) {
+                    d->erase(d->begin()+i);
+            }
 	}
 	if(EVEN_HALF_DATA) {
-		for(int i=d->size()-(1-d->size()%2)-1;i>=0;i-=2) {
-			d->erase(d->begin()+i);
-		}
+            for(int i=d->size()-(1-d->size()%2)-1;i>=0;i-=2) {
+                    d->erase(d->begin()+i);
+            }
 	}
 		
 	return d;
@@ -355,7 +355,27 @@ __device__ bayes_t compute_prior(int N, int idx, op* P, data_t* C) {
     
     bayes_t prior = -PRIOR_MULTIPLIER * length * NOPS;
     for(int c=0;c<NCONSTANTS;c++) {
-        prior += lcauchypdf(C[idx+c*N], CONSTANT_SCALE); // proportional to cauchy density
+//         prior += lcauchypdf(C[idx+c*N], CONSTANT_SCALE); // proportional to cauchy density
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        prior += lnormalpdf(C[idx+c*N], CONSTANT_SCALE);
     }
     
     return prior;
@@ -448,7 +468,8 @@ __global__ void MH_simple_kernel(int N, op* P, data_t* C, datum* D, int ndata, i
                 int i = idx+N*c;  
                 old_C[c] = C[i];
             
-                int order = random_int(C_MAX_ORDER+C_MIN_ORDER,RNG_ARGS)-C_MIN_ORDER; // what order of magnitude?
+                int order = random_int(C_MAX_ORDER-C_MIN_ORDER,RNG_ARGS)+C_MIN_ORDER; // what order of magnitude?
+//                 int order=0;
                 C[i] = C[i] + CONSTANT_SCALE * powf(10.0,order) * random_normal(RNG_ARGS);                   
             }
             
@@ -562,6 +583,7 @@ static struct option long_options[] =
         {"gpu",          required_argument,    NULL, 'g'},
         {"first-half",   no_argument,    NULL, 'f'},
         {"even-half",    no_argument,    NULL, 'e'},
+//         {"quiet",        no_argument,    NULL, 'q'},
         {"all",    no_argument,    NULL, '_'},
         {NULL, 0, 0, 0} // zero row for bad arguments
     };  
@@ -576,6 +598,7 @@ int main(int argc, char** argv)
     int thin = 1; // how many outer blocks to skip?
     int seed = -1;
     int burn = 0;
+//     int quiet = 0; 
     int WHICH_GPU = 0;
     int FIRST_HALF_DATA = 0;
     int EVEN_HALF_DATA = 0;
@@ -600,6 +623,7 @@ int main(int argc, char** argv)
             case 's': seed = (float)atof(optarg); break;
             case 'f': FIRST_HALF_DATA = 1; break;
             case 'e': EVEN_HALF_DATA = 1; break;
+//             case 'q': quiet = 1; break;
             case '_': break; // don't do anything if we use all the data
             
             default: return 1; // unspecified
@@ -676,7 +700,7 @@ int main(int argc, char** argv)
     fprintf(fp, "# -- Data:\n");
     fprintf(fp, "# -----------------------------------------------------------------\n");
     for(int i=0;i<ndata;i++) 
-        fprintf(fp, "# %f\t%f\t%f\n", host_D[i].x, host_D[i].y, host_D[i].sd);
+        fprintf(fp, "# \t%f\t%f\t%f\n", host_D[i].x, host_D[i].y, host_D[i].sd);
     fprintf(fp, "#\n#\n");
     fclose(fp);
     
@@ -689,14 +713,11 @@ int main(int argc, char** argv)
     bayes_t* host_prior =  new bayes_t[N];
     bayes_t* host_likelihood =  new bayes_t[N]; 
     
-
     for(int i=0;i<PROGRAM_LENGTH*N;i++) host_P[i] = random_int_host(NOPS-1);
     for(int i=0;i<NCONSTANTS*N;i++)    {
-        int order = random_int_host(C_MAX_ORDER+C_MIN_ORDER)-C_MIN_ORDER; 
+        int order = random_int_host(C_MAX_ORDER-C_MIN_ORDER)+C_MIN_ORDER; 
         host_C[i] = CONSTANT_SCALE * powf(10.0,order) * random_normal();
     }
-        
-    
     
     // -----------------------------------------------------------------------
     // Allocate on device and copy
@@ -770,7 +791,7 @@ int main(int argc, char** argv)
                 // randomize
                 for(int i=0;i<PROGRAM_LENGTH;i++) host_P[h+i*N] = random_int_host(NOPS-1);
                 for(int i=0;i<NCONSTANTS;i++)   {
-                    int order = random_int_host(C_MAX_ORDER+C_MIN_ORDER)-C_MIN_ORDER; 
+                    int order = random_int_host(C_MAX_ORDER-C_MIN_ORDER)+C_MIN_ORDER; 
                     host_C[h+i*N] = CONSTANT_SCALE * powf(10.0,order) * random_normal();    
                 }
             }
