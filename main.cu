@@ -25,17 +25,18 @@ const float PRIOR_MULTIPLIER = 1.0; // prior is exp(-PRIOR_MULTIPLIER * length)
 const float CONST_LENGTH_PRIOR = 1.0; // how much do constants cost in terms of length?
 const float X_LENGTH_PRIOR = 1.0; // how much does X cost in terms of length?
 
-const int PROGRAM_LENGTH = 15; // how many operations do we allow? This is the max index of the program array. 
-const int NCONSTANTS     = 15; // each op may use a constant if it wants (but most do not)
+const int PROGRAM_LENGTH = 4; //15; // how many operations do we allow? This is the max index of the program array. 
+const int NCONSTANTS     = 4; //15; // each op may use a constant if it wants (but most do not)
 
 const float CONSTANT_SCALE = 1.0; // Scales the constants in the prior
 const int C_MAX_ORDER = 4; //  constants are chosen with scales between 10^C_MIN_ORDER and 10^C_MAX_ORDER
 const int C_MIN_ORDER = -4; 
+const float P_PROPOSE_C_TO_ZERO = 0.2; // how often do we propose setting a constant to zero?
 
 const float resample_threshold = 10.0; // hypotheses more than this far from the MAP get resampled every outer block
 
 // Setup for gpu hardware 
-const int BLOCK_SIZE = 128;
+const int BLOCK_SIZE = 128; //128;
 int N_BLOCKS = 0; // set below
 const int HARDARE_MAX_X_BLOCKS = 1024;
 const int HARDWARE_MAX_THREADS_PER_BLOCK = 1024; // cannot exceed this many threads per block! For compute level 2.x and greater!
@@ -53,9 +54,14 @@ typedef struct datum {
 } datum;
 
 //          1     I   a  b   +      -       _     #      *      @      /    |     L    E    ^     p    V      P     R     S     A    T      G      A    2
-enum OPS { ONE, INV, A, B, PLUS, MINUS, RMINUS, CPLUS, TIMES, CTIMES, DIV, RDIV, LOG, EXP, POW, CPOW, RPOW, CRPOW, SQRT, SIN, ASIN, ATAN, GAMMA,  ABS, SQR,    NOPS};
-enum UNUSED_OPS { BESSEL=-999};
-const char* PROGRAM_CODE = "1Iab+-_#*@/|LE^pVPRSATGA2"; // if we want to print a concise description of the program (mainly for debugging) These MUST be algined with OPS
+// enum OPS { CONST, INV, A, B, PLUS, MINUS, RMINUS, CPLUS, TIMES, CTIMES, DIV, RDIV, LOG, EXP, POW, CPOW, RPOW, CRPOW, SQRT, SIN, ASIN, ATAN, GAMMA,  ABS, SQR,    NOPS};
+// enum UNUSED_OPS { BESSEL=-999, ONE};
+// const char* PROGRAM_CODE = "CIab+-_#*@/|LE^pVPRSATGA2"; // if we want to print a concise description of the program (mainly for debugging) These MUST be algined with OPS
+
+enum OPS { CONST, A, B, CPLUS, CTIMES,   NOPS};
+enum UNUSED_OPS { BESSEL=-999, ONE, INV, PLUS, MINUS, RMINUS, TIMES, DIV, RDIV, LOG, EXP, POW, CPOW, RPOW, CRPOW, SQRT, SIN, ASIN, ATAN, GAMMA,  ABS, SQR,};
+const char* PROGRAM_CODE = "Cab+*"; // if we want to print a concise description of the program (mainly for debugging) These MUST be algined with OPS
+
 
 // Command line arguments that get set below (these give default values)
 data_t sdscale = 1.0; // scale the SDs by this
@@ -266,7 +272,8 @@ template<class T> __device__ T program_fold(int N, int idx, op* P, data_t* C, T 
 // evaluat a single operation op on arguments a and b
 __device__ data_t dispatch_eval(op o, data_t a, data_t b, data_t C) {
         switch(o) {
-            case ONE:   return  1.0;
+            case ONE:    return  1.0;
+            case CONST:  return C;
             case INV:    return fdividef(1.0,a);
             case A:      return a; 
             case B:      return b; // need both since of how consts are passed in
@@ -329,6 +336,7 @@ __device__ float dispatch_length(op o, float a, float b, float c__unusued) {
     // c is unused
         switch(o) {
             case ONE:    return 1;
+            case CONST:  return CONST_LENGTH_PRIOR;
             case INV:    return 1+a;
             case A:      return a; 
             case B:      return b; // need both since of how consts are passed in
@@ -456,19 +464,40 @@ __global__ void MH_simple_kernel(int N, op* P, data_t* C, datum* D, int ndata, i
 		
         } 
         else { // propose to a constant otherwise
-
+            bayes_t fb = 0.0; //log forward - log backward probability
+            
             // In this version, we propose to all constants, but with varying scales
             for(int c=0;c<NCONSTANTS;c++) {
                 int i = idx+N*c;  
                 old_C[c] = C[i];
-            
-                int order = random_int(C_MAX_ORDER-C_MIN_ORDER,RNG_ARGS)+C_MIN_ORDER; // what order of magnitude?
-                C[i] = C[i] + CONSTANT_SCALE * powf(10.0,order) * random_normal(RNG_ARGS);                   
+                
+                // sometimes we propose changing to zero, or away from zero to the prior
+                if(random_float(RNG_ARGS) < P_PROPOSE_C_TO_ZERO) {
+                    
+                    /* To deal with the unused constants, here we mix tegether proposals to 0.0
+                     * with a normal distribution. This is necessary or else the prior of the unused
+                     * constants matters a lot. 
+                     */
+                    if(random_float(RNG_ARGS) < 0.5) { // propose to zero
+                        C[i] = 0.0;
+                        fb = -lnormalpdf(C[i]/CONSTANT_SCALE, 1.0);
+                    } else { // propose from the prior 
+                        C[i] = CONSTANT_SCALE * random_normal(RNG_ARGS);  
+                        fb = lnormalpdf(C[i]/CONSTANT_SCALE, 1.0);                        
+                    }
+                    
+                }
+                else{
+                    // Most of our proposals are just normal centered on the current value. 
+                    
+                    int order = random_int(C_MAX_ORDER-C_MIN_ORDER,RNG_ARGS)+C_MIN_ORDER; // what order of magnitude?
+                    C[i] = C[i] + CONSTANT_SCALE * powf(10.0,order) * random_normal(RNG_ARGS);                   
+                }
             }
             
             bayes_t proposal_prior = compute_prior(N, idx, P, C);
             bayes_t proposal_likelihood = compute_likelihood(N, idx, P, C, D, ndata);
-            bayes_t proposal = proposal_prior + proposal_likelihood;
+            bayes_t proposal = proposal_prior + proposal_likelihood - fb;
                     
             if((is_valid(proposal) && (proposal>current || random_float(RNG_ARGS) < expf(proposal-current))) || is_invalid(current)) {
                 current = proposal; // store the updated posterior
@@ -500,6 +529,7 @@ __global__ void MH_simple_kernel(int N, op* P, data_t* C, datum* D, int ndata, i
 void string_dispatch( char* target, op o, const char* a, const char* b, const char* C) {
         switch(o) {
             case ONE:   strcat(target, "1"); break;
+            case CONST: strcat(target, C); break;
             case INV:   strcat(target, "(1/"); strcat(target, a); strcat(target, ")"); break;
             case A:     strcat(target, a); break;
             case B:     strcat(target, b); break;// need both since of how consts are passed in
