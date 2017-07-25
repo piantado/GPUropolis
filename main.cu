@@ -25,8 +25,8 @@ const float PRIOR_MULTIPLIER = 1.0; // prior is exp(-PRIOR_MULTIPLIER * length)
 const float CONST_LENGTH_PRIOR = 1.0; // how much do constants cost in terms of length?
 const float X_LENGTH_PRIOR = 1.0; // how much does X cost in terms of length?
 
-const int PROGRAM_LENGTH = 4; //15; // how many operations do we allow? This is the max index of the program array. 
-const int NCONSTANTS     = 4; //15; // each op may use a constant if it wants (but most do not)
+const int PROGRAM_LENGTH = 15; // how many operations do we allow? This is the max index of the program array. 
+const int NCONSTANTS     = 15; // each op may use a constant if it wants (but most do not)
 
 const float CONSTANT_SCALE = 1.0; // Scales the constants in the prior
 const int C_MAX_ORDER = 4; //  constants are chosen with scales between 10^C_MIN_ORDER and 10^C_MAX_ORDER
@@ -54,13 +54,14 @@ typedef struct datum {
 } datum;
 
 //          1     I   a  b   +      -       _     #      *      @      /    |     L    E    ^     p    V      P     R     S     A    T      G      A    2
-// enum OPS { CONST, INV, A, B, PLUS, MINUS, RMINUS, CPLUS, TIMES, CTIMES, DIV, RDIV, LOG, EXP, POW, CPOW, RPOW, CRPOW, SQRT, SIN, ASIN, ATAN, GAMMA,  ABS, SQR,    NOPS};
-// enum UNUSED_OPS { BESSEL=-999, ONE};
-// const char* PROGRAM_CODE = "CIab+-_#*@/|LE^pVPRSATGA2"; // if we want to print a concise description of the program (mainly for debugging) These MUST be algined with OPS
+enum OPS { CONST, INV, A, B, PLUS, MINUS, RMINUS, CPLUS, TIMES, CTIMES, DIV, RDIV, LOG, EXP, POW, CPOW, RPOW, CRPOW, SQRT, SIN, ASIN, ATAN, GAMMA,  ABS, SQR,    NOPS};
+enum UNUSED_OPS { BESSEL=-999, ONE};
+const char* PROGRAM_CODE = "CIab+-_#*@/|LE^pVPRSATGA2"; // if we want to print a concise description of the program (mainly for debugging) These MUST be algined with OPS
 
-enum OPS { CONST, A, B, CPLUS, CTIMES,   NOPS};
-enum UNUSED_OPS { BESSEL=-999, ONE, INV, PLUS, MINUS, RMINUS, TIMES, DIV, RDIV, LOG, EXP, POW, CPOW, RPOW, CRPOW, SQRT, SIN, ASIN, ATAN, GAMMA,  ABS, SQR,};
-const char* PROGRAM_CODE = "Cab+*"; // if we want to print a concise description of the program (mainly for debugging) These MUST be algined with OPS
+// debugging
+// enum OPS { CONST, A, B, CPLUS, CTIMES,   NOPS};
+// enum UNUSED_OPS { BESSEL=-999, ONE, INV, PLUS, MINUS, RMINUS, TIMES, DIV, RDIV, LOG, EXP, POW, CPOW, RPOW, CRPOW, SQRT, SIN, ASIN, ATAN, GAMMA,  ABS, SQR,};
+// const char* PROGRAM_CODE = "Cab+*"; // if we want to print a concise description of the program (mainly for debugging) These MUST be algined with OPS
 
 
 // Command line arguments that get set below (these give default values)
@@ -790,7 +791,7 @@ int main(int argc, char** argv)
                 for(int i=0;i<PROGRAM_LENGTH;i++) {
                     fprintf(fp, "%c", PROGRAM_CODE[host_P[h+N*i]]);
                 }
-                fprintf(fp, "\"\t\t");
+                fprintf(fp, "\"\t");
                 
                 for(int c=0;c<NCONSTANTS;c++){ 
                     fprintf(fp, "%.10f\t", host_C[h+N*c]);
