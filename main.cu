@@ -31,7 +31,9 @@ const int NCONSTANTS     = 15; // each op may use a constant if it wants (but mo
 const float CONSTANT_SCALE = 1.0; // Scales the constants in the prior
 const int C_MAX_ORDER = 4; //  constants are chosen with scales between 10^C_MIN_ORDER and 10^C_MAX_ORDER
 const int C_MIN_ORDER = -4; 
-const float P_PROPOSE_C_TO_ZERO = 0.2; // how often do we propose setting a constant to zero?
+const float P_PROPOSE_C_GEOMETRIC = 0.2; // how often do we propose setting a constant to zero?
+const float PROPOSE_GEOM_R = 0.1; // higher means we propose to higher integers (geometric rate on proposal)
+            
 
 const float resample_threshold = 10.0; // hypotheses more than this far from the MAP get resampled every outer block
 
@@ -45,18 +47,21 @@ const int HARDWARE_MAX_THREADS_PER_BLOCK = 1024; // cannot exceed this many thre
 typedef int op; // what type is the program primitives?
 typedef float data_t; // the type of the data we read and operate on in the program
 typedef double bayes_t; // when we compute Bayesian things (priors, likelihoods, etc.) what type do we use?
+typedef struct datum { data_t x; data_t y; data_t sd; } datum; // A structure to hold data: x,y,stdev pairs 
 
-/* A structure to hold data: x,y,stdev pairs */
-typedef struct datum {
-    data_t x;
-    data_t y;
-    data_t sd; // stdev of the output|input. 
-} datum;
+// Choose the set of operations
+#if !defined SIMPLIFIED_OPS
+//            C     I   a  b   +      -       _       #      *      @      /    |     L    E    ^     p    V      P     R     S     s    C    c      T    t     G      A    B
+enum OPS {CONST, INV, A, B, PLUS, MINUS, RMINUS, CPLUS, TIMES, CTIMES, DIV, RDIV, LOG, EXP, POW, CPOW, RPOW, CRPOW, SQRT, SIN, ASIN, COS, ACOS, TAN, ATAN, GAMMA,  ABS, BESSEL,    NOPS};
+enum UNUSED_OPS { SQR=-999, ONE};
+const char* PROGRAM_CODE = "CIab+-_#*@/|LE^pVPRSsCcTtGAB"; // if we want to print a concise description of the program (mainly for debugging) These MUST be algined with OPS
+#endif
 
-//          1     I   a  b   +      -       _     #      *      @      /    |     L    E    ^     p    V      P     R     S     A    T      G      A    2
-enum OPS { CONST, INV, A, B, PLUS, MINUS, RMINUS, CPLUS, TIMES, CTIMES, DIV, RDIV, LOG, EXP, POW, CPOW, RPOW, CRPOW, SQRT, SIN, ASIN, ATAN, GAMMA,  ABS, SQR,    NOPS};
-enum UNUSED_OPS { BESSEL=-999, ONE};
-const char* PROGRAM_CODE = "CIab+-_#*@/|LE^pVPRSATGA2"; // if we want to print a concise description of the program (mainly for debugging) These MUST be algined with OPS
+#if defined SIMPLIFIED_OPS
+enum OPS {CONST, INV, A, B, PLUS, MINUS, RMINUS, CPLUS, TIMES, CTIMES, DIV, RDIV, NOPS};
+enum UNUSED_OPS { SQR=-999, ONE, LOG, EXP, POW, CPOW, RPOW, CRPOW, SQRT, SIN, ASIN, COS, ACOS, TAN, ATAN, GAMMA,  ABS, BESSEL};
+const char* PROGRAM_CODE = "CIab+-_#*@/|";
+#endif
 
 // debugging
 // enum OPS { CONST, A, B, CPLUS, CTIMES,   NOPS};
@@ -66,19 +71,66 @@ const char* PROGRAM_CODE = "CIab+-_#*@/|LE^pVPRSATGA2"; // if we want to print a
 
 // Command line arguments that get set below (these give default values)
 data_t sdscale = 1.0; // scale the SDs by this
-int N = 10000;
+int N = 1024;
 int steps = 1000;
 int outer = 100;
 int thin = 1; // how many outer blocks to skip?
 int seed = -1;
 int burn = 0;
-//     int quiet = 0; 
+int QUIET = 0; 
 int WHICH_GPU = 0;
 int FIRST_HALF_DATA = 0;
 int EVEN_HALF_DATA = 0;
+int SHOW_CONSTANTS = 0;
 string in_file_path = "data.txt";
 string out_path = "out/";
     
+static struct option long_options[] =
+    {   
+        {"in",           required_argument,    NULL, 'd'},
+        {"steps",   required_argument,    NULL, 'i'},
+        {"N",            required_argument,    NULL, 'N'},
+        {"out",          required_argument,    NULL, 'O'},
+        {"outer",        required_argument,    NULL, 'o'},
+        {"thin",         required_argument,    NULL, 't'},
+        {"seed",         required_argument,    NULL, 's'},
+        {"burn",         required_argument,    NULL, 'b'},
+        {"gpu",          required_argument,    NULL, 'g'},
+        {"sdscale",      required_argument,    NULL, 'r'},
+        {"first-half",   no_argument,    NULL, 'f'},
+        {"even-half",    no_argument,    NULL, 'e'},        
+        {"show-constantsf",    no_argument,    NULL, 'C'},        
+        {"quiet",        no_argument,    NULL, 'q'},
+        {"all",    no_argument,    NULL, '_'},
+        {NULL, 0, 0, 0} // zero row for bad arguments
+    };  
+    
+int process_arguments(int argc, char** argv) {
+        
+    int option_index = 0, opt=0;
+    while( (opt = getopt_long( argc, argv, "bp", long_options, &option_index )) != -1 )
+        switch( opt ) {
+            case 'd': in_file_path = optarg; break;
+            case 'i': steps = atoi(optarg); break;
+            case 'N': N = atoi(optarg); break;
+            case 'o': outer = atoi(optarg); break;
+            case 'O': out_path = optarg; break;
+            case 't': thin = atoi(optarg); break;
+            case 'b': burn = atoi(optarg); break;
+            case 'g': WHICH_GPU = atoi(optarg); break;
+            case 's': seed = atoi(optarg); break;
+            case 'r': sdscale = (float)atof(optarg); break;
+            case 'f': FIRST_HALF_DATA = 1; break;
+            case 'e': EVEN_HALF_DATA = 1; break;
+            case 'C': SHOW_CONSTANTS = 1; break;
+            case 'q': QUIET = 1; break;
+            case '_': break; // don't do anything if we use all the data
+            
+            default: 
+                return 1; // unspecified
+        }
+    return 0;
+}
 
 // -----------------------------------------------------------------------
 // Memory Macros
@@ -106,6 +158,14 @@ string out_path = "out/";
 #define is_valid(x) (!is_invalid(x))
 #define is_invalid(x) (isnan(x) || (!isfinite(x))) 
 
+ #define max(a,b) \
+   ({ typeof (a) _a = (a); \
+      typeof (b) _b = (b); \
+      _a > _b ? _a : _b; })
+#define logplusexp(a,b) ({ typeof(a) m = max(a,b); logf(expf(a-m)+expf(b-m))+m; })
+    
+#define is_int(x) (abs(x-lroundf(x)) < 1.0e-6)
+    
 #define PIf 3.141592653589 
  
 /* These macros allow us to use RNG_DEF and RNG_ARGS in function calls, and swap out 
@@ -165,6 +225,12 @@ float random_cauchy() {
     float v = random_normal();
     return u/v;
 }
+
+__device__ float random_geometric(float r, RNG_DEF) {
+    // From Devroye Example 2.2
+    return ceilf(logf(random_float(RNG_ARGS)) / log(r));
+}
+
    
 __device__ __host__ bayes_t lnormalpdf( float x, float s ){
     return -(x*x)/(2.0*s*s) - 0.5 * (logf(2.0*PIf) + 2.0*logf(s));
@@ -172,6 +238,10 @@ __device__ __host__ bayes_t lnormalpdf( float x, float s ){
 
 __device__ __host__ bayes_t lcauchypdf( float x, float s ){
     return -logf(PIf) - logf(s) - logf(1.0+x*x/s);
+}
+
+__device__ __host__ bayes_t lgeometricpdf(float n, float r) {
+    return (n-1)*logf(r)+log(1.0-r);
 }
 
 int random_int_host(int limit) {
@@ -289,8 +359,11 @@ __device__ data_t dispatch_eval(op o, data_t a, data_t b, data_t C) {
             case SQRT:   return sqrtf(a);
             case SQR:    return a*a;
             case LOG:    return logf(a);
-            case SIN:    return sin(a);
+            case SIN:    return sinf(a);
             case ASIN:   return asinf(a);
+            case COS:    return cosf(a);
+            case ACOS:   return acosf(a);
+            case TAN:    return tanf(a);            
             case ATAN:   return atanf(a);
             case EXP:    return expf(a);
             case POW:    return powf(a,b);
@@ -354,6 +427,9 @@ __device__ float dispatch_length(op o, float a, float b, float c__unusued) {
             case LOG:    return 1+a;
             case SIN:    return 1+a;
             case ASIN:   return 1+a;
+            case COS:    return 1+a;
+            case ACOS:   return 1+a;
+            case TAN:    return 1+a;
             case ATAN:   return 1+a;
             case EXP:    return 1+a;
             case POW:    return 1+a+b;
@@ -414,7 +490,7 @@ __global__ void MH_simple_kernel(int N, op* P, data_t* C, datum* D, int ndata, i
 
     bayes_t current_prior = compute_prior(N, idx, P, C);
     bayes_t current_likelihood = compute_likelihood(N, idx, P, C, D, ndata);
-    bayes_t current = current_prior + current_likelihood;
+    bayes_t current_posterior = current_prior + current_likelihood;
         
     // Two possibilities here. We could let everything do the same proposals (for all steps) in which case we don't
     // add idx. This makes them access the same memory, etc. Alternatively we could add idx and make them separate
@@ -430,7 +506,7 @@ __global__ void MH_simple_kernel(int N, op* P, data_t* C, datum* D, int ndata, i
 	    if( mcmci % 5 == 0) { // propose to a structure every this often
                 int n;//0-indexed 
                 
-                if(is_invalid(current)){
+                if(is_invalid(current_posterior)){
                    n = 0; // always propose to the root if we're terrible
                 } else {
                    n = random_int(PROGRAM_LENGTH, RNG_ARGS); // pick a node to propose to, note that here 1 is the root (by tree logic)                 
@@ -449,10 +525,10 @@ __global__ void MH_simple_kernel(int N, op* P, data_t* C, datum* D, int ndata, i
                 
                 bayes_t proposal_prior = compute_prior(N, idx, P, C);
                 bayes_t proposal_likelihood = compute_likelihood(N, idx, P, C, D, ndata);
-                bayes_t proposal = proposal_prior + proposal_likelihood;
+                bayes_t proposal_posterior = proposal_prior + proposal_likelihood;
                         
-                if(is_valid(proposal) && (proposal>current || random_float(RNG_ARGS) < expf(proposal-current))) {
-                    current = proposal; // store the updated posterior
+                if(is_valid(proposal_posterior) && (proposal_posterior>current_posterior || random_float(RNG_ARGS) < expf(proposal_posterior-current_posterior))) {
+                    current_posterior = proposal_posterior; // store the updated posterior
                     current_likelihood = proposal_likelihood;
                     current_prior = proposal_prior;
                 } else {
@@ -473,35 +549,44 @@ __global__ void MH_simple_kernel(int N, op* P, data_t* C, datum* D, int ndata, i
                 old_C[c] = C[i];
                 
                 // sometimes we propose changing to zero, or away from zero to the prior
-                if(random_float(RNG_ARGS) < P_PROPOSE_C_TO_ZERO) {
+                if(random_float(RNG_ARGS) < P_PROPOSE_C_GEOMETRIC) {
                     
-                    /* To deal with the unused constants, here we mix tegether proposals to 0.0
-                     * with a normal distribution. This is necessary or else the prior of the unused
-                     * constants matters a lot. 
+                    /* To deal with the unused constants, here we mix tegether a random_geometric and a normal
+                     * This is necessary or else the prior of the unused constants matters a lot. 
                      */
-                    if(random_float(RNG_ARGS) < 0.5) { // propose to zero
-                        C[i] = 0.0;
-                        fb = -lnormalpdf(C[i]/CONSTANT_SCALE, 1.0);
+                    if(random_float(RNG_ARGS) < 0.5) { // propose to an integer
+		        float sgn = -1 + (random_float(RNG_ARGS) < 0.5)*2; // -1 or 1
+                        C[i] = sgn*random_geometric(PROPOSE_GEOM_R, RNG_ARGS)-1; // shift by 1 to make 0 the least of support
+                        fb = lgeometricpdf(C[i]+1, PROPOSE_GEOM_R); // forward
                     } else { // propose from the prior 
                         C[i] = CONSTANT_SCALE * random_normal(RNG_ARGS);  
-                        fb = lnormalpdf(C[i]/CONSTANT_SCALE, 1.0);                        
+                        fb = lnormalpdf(C[i]/CONSTANT_SCALE, 1.0); // forward
                     }
+
+                    // subtract the backward
+                    if( is_int(old_C[c]) ) { 
+                        fb -= logplusexp(lgeometricpdf(old_C[c]+1, PROPOSE_GEOM_R), lnormalpdf(old_C[c]/CONSTANT_SCALE, 1.0));
+                    } else {
+                        fb -= lnormalpdf(old_C[c]/CONSTANT_SCALE, 1.0);
+                    }
+                    
                     
                 }
                 else{
                     // Most of our proposals are just normal centered on the current value. 
                     
                     int order = random_int(C_MAX_ORDER-C_MIN_ORDER,RNG_ARGS)+C_MIN_ORDER; // what order of magnitude?
-                    C[i] = C[i] + CONSTANT_SCALE * powf(10.0,order) * random_normal(RNG_ARGS);                   
+                    C[i] = C[i] + CONSTANT_SCALE * powf(10.0,order) * random_normal(RNG_ARGS);        
+                    fb = 0.0; // proposal is symmetric
                 }
             }
             
             bayes_t proposal_prior = compute_prior(N, idx, P, C);
             bayes_t proposal_likelihood = compute_likelihood(N, idx, P, C, D, ndata);
-            bayes_t proposal = proposal_prior + proposal_likelihood - fb;
+            bayes_t proposal_posterior = proposal_prior + proposal_likelihood - fb;
                     
-            if((is_valid(proposal) && (proposal>current || random_float(RNG_ARGS) < expf(proposal-current))) || is_invalid(current)) {
-                current = proposal; // store the updated posterior
+            if((is_valid(proposal_posterior) && (proposal_posterior>current_posterior || random_float(RNG_ARGS) < expf(proposal_posterior-current_posterior))) || is_invalid(current_posterior)) {
+                current_posterior = proposal_posterior; // store the updated posterior
                 current_likelihood = proposal_likelihood;
                 current_prior = proposal_prior;
             } else {
@@ -545,6 +630,9 @@ void string_dispatch( char* target, op o, const char* a, const char* b, const ch
             case LOG:   strcat(target, "log("); strcat(target, a); strcat(target, ")"); break;
             case SIN:   strcat(target, "sin("); strcat(target, a); strcat(target, ")"); break;
             case ASIN:  strcat(target, "asin("); strcat(target, a); strcat(target, ")"); break;
+            case COS:   strcat(target, "cos("); strcat(target, a); strcat(target, ")"); break;
+            case ACOS:  strcat(target, "acos("); strcat(target, a); strcat(target, ")"); break;
+            case TAN:   strcat(target, "tan("); strcat(target, a); strcat(target, ")"); break;
             case ATAN:  strcat(target, "atan("); strcat(target, a); strcat(target, ")"); break;
             case SQR:   strcat(target, "(("); strcat(target, a); strcat(target, ")^2)"); break;
             case SQRT:  strcat(target, "sqrt("); strcat(target, a); strcat(target, ")"); break;
@@ -594,54 +682,18 @@ void displaystring(const char* const_format, int N, int idx, op* P, data_t* C, F
 // --------------------------------------------------------------------------------------------------------------
 // --------------------------------------------------------------------------------------------------------------
 
-static struct option long_options[] =
-    {   
-        {"in",           required_argument,    NULL, 'd'},
-        {"steps",   required_argument,    NULL, 'i'},
-        {"N",            required_argument,    NULL, 'N'},
-        {"out",          required_argument,    NULL, 'O'},
-        {"outer",        required_argument,    NULL, 'o'},
-        {"thin",         required_argument,    NULL, 't'},
-        {"seed",         required_argument,    NULL, 's'},
-        {"burn",         required_argument,    NULL, 'b'},
-        {"gpu",          required_argument,    NULL, 'g'},
-        {"sdscale",      required_argument,    NULL, 'r'},
-        {"first-half",   no_argument,    NULL, 'f'},
-        {"even-half",    no_argument,    NULL, 'e'},
-        
-//         {"quiet",        no_argument,    NULL, 'q'},
-        {"all",    no_argument,    NULL, '_'},
-        {NULL, 0, 0, 0} // zero row for bad arguments
-    };  
 
 int main(int argc, char** argv)
 {   
-    
     // ----------------------------------------------------------------------------
     // Parse command line
     // -----------------------------------------------------------------------
-    
-    int option_index = 0, opt=0;
-    while( (opt = getopt_long( argc, argv, "bp", long_options, &option_index )) != -1 )
-        switch( opt ) {
-            case 'd': in_file_path = optarg; break;
-            case 'i': steps = atoi(optarg); break;
-            case 'N': N = atoi(optarg); break;
-            case 'o': outer = atoi(optarg); break;
-            case 'O': out_path = optarg; break;
-            case 't': thin = atoi(optarg); break;
-            case 'b': burn = atoi(optarg); break;
-            case 'g': WHICH_GPU = atoi(optarg); break;
-            case 's': seed = atoi(optarg); break;
-            case 'r': sdscale = (float)atof(optarg); break;
-            case 'f': FIRST_HALF_DATA = 1; break;
-            case 'e': EVEN_HALF_DATA = 1; break;
-//             case 'q': quiet = 1; break;
-            case '_': break; // don't do anything if we use all the data
-            
-            default: return 1; // unspecified
-        }
-    
+   
+    if(process_arguments(argc, argv)==1) {
+        cerr << "Invalid command line arguments." << endl;
+        return 1;
+    }
+        
     // -----------------------------------------------------------------------
     // Check a few things
     // -----------------------------------------------------------------------
@@ -791,10 +843,12 @@ int main(int argc, char** argv)
                 for(int i=0;i<PROGRAM_LENGTH;i++) {
                     fprintf(fp, "%c", PROGRAM_CODE[host_P[h+N*i]]);
                 }
-                fprintf(fp, "\"\t");
+                fprintf(fp, "\"\t");    
                 
-                for(int c=0;c<NCONSTANTS;c++){ 
-                    fprintf(fp, "%.10f\t", host_C[h+N*c]);
+                if(SHOW_CONSTANTS) {
+                    for(int c=0;c<NCONSTANTS;c++){ 
+                        fprintf(fp, "%.10f\t", host_C[h+N*c]);
+                    }
                 }
                 
                 fprintf(fp, "\n");            
@@ -825,16 +879,25 @@ int main(int argc, char** argv)
         cudaMemcpy(device_C, host_C, N*NCONSTANTS*sizeof(data_t), cudaMemcpyHostToDevice);  CUDA_CHECK();
         
         // print a progress bar to stderr
+        if(!QUIET) {
+            int BAR_WIDTH = 70;
+            fprintf(stderr, "\r[");
+            for(int p=0;p<BAR_WIDTH;p++) { 
+                if(p <= o * BAR_WIDTH/outer) fprintf(stderr,"=");
+                else                         fprintf(stderr," ");
+                
+            }
+            fprintf(stderr, "]");
+        }
+    }
+    
+    if(!QUIET) {
+        // finish printing this since it makes steve happy
         int BAR_WIDTH = 70;
         fprintf(stderr, "\r[");
-        for(int p=0;p<BAR_WIDTH;p++) { 
-            if(p <= o * BAR_WIDTH/outer) fprintf(stderr,"=");
-            else                         fprintf(stderr," ");
-            
-        }
+        for(int p=0;p<BAR_WIDTH;p++) { fprintf(stderr,"=");}
         fprintf(stderr, "]");
     }
-        
         
     // -----------------------------------------------------------------------
     // Cleanup
