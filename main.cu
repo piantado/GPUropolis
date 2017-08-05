@@ -38,10 +38,10 @@ const float PROPOSE_GEOM_R = 0.1; // higher means we propose to higher integers 
 const float resample_threshold = 10.0; // hypotheses more than this far from the MAP get resampled every outer block
 
 // Setup for gpu hardware 
-const int BLOCK_SIZE = 128; //128;
+const unsigned int BLOCK_SIZE = 128; // empirically determined to work well
 int N_BLOCKS = 0; // set below
-const int HARDARE_MAX_X_BLOCKS = 1024;
-const int HARDWARE_MAX_THREADS_PER_BLOCK = 1024; // cannot exceed this many threads per block! For compute level 2.x and greater!
+const unsigned int HARDARE_MAX_X_BLOCKS = 4096;
+const unsigned int HARDWARE_MAX_THREADS_PER_BLOCK = 1024; // cannot exceed this many threads per block! For compute level 2.x and greater!
 
 /* Define a few types so that we can change precision if we need to */
 typedef int op; // what type is the program primitives?
@@ -50,18 +50,32 @@ typedef double bayes_t; // when we compute Bayesian things (priors, likelihoods,
 typedef struct datum { data_t x; data_t y; data_t sd; } datum; // A structure to hold data: x,y,stdev pairs 
 
 // Choose the set of operations
-#if !defined SIMPLIFIED_OPS
+#if !defined SIMPLIFIED_OPS and !defined POLYNOMIAL_OPS
 //            C     I   a  b   +      -       _       #      *      @      /    |     L    E    ^     p    V      P     R     S     s    C    c      T    t     G      A    B
-enum OPS {CONST, INV, A, B, PLUS, MINUS, RMINUS, CPLUS, TIMES, CTIMES, DIV, RDIV, LOG, EXP, POW, CPOW, RPOW, CRPOW, SQRT, SIN, ASIN, COS, ACOS, TAN, ATAN, GAMMA,  ABS, BESSEL,    NOPS};
-enum UNUSED_OPS { SQR=-999, ONE};
-const char* PROGRAM_CODE = "CIab+-_#*@/|LE^pVPRSsCcTtGAB"; // if we want to print a concise description of the program (mainly for debugging) These MUST be algined with OPS
+enum OPS {ONE, CONST, INV, A, B, PLUS, MINUS, RMINUS, CPLUS, TIMES, CTIMES, DIV, RDIV, LOG, EXP, POW, CPOW, RPOW, CRPOW, SQRT, SIN, ASIN, COS, ACOS, TAN, ATAN,  ABS,  NOPS};
+enum UNUSED_OPS { SQR=-999, GAMMA, BESSEL};
+const char* PROGRAM_CODE = "1CIab+-_#*@/|LE^pVPRSsCcTtA"; // if we want to print a concise description of the program (mainly for debugging) These MUST be algined with OPS
 #endif
 
 #if defined SIMPLIFIED_OPS
-enum OPS {CONST, INV, A, B, PLUS, MINUS, RMINUS, CPLUS, TIMES, CTIMES, DIV, RDIV, NOPS};
+enum OPS {ONE, CONST, INV, A, B, PLUS, MINUS, RMINUS, CPLUS, TIMES, CTIMES, DIV, RDIV, NOPS};
 enum UNUSED_OPS { SQR=-999, ONE, LOG, EXP, POW, CPOW, RPOW, CRPOW, SQRT, SIN, ASIN, COS, ACOS, TAN, ATAN, GAMMA,  ABS, BESSEL};
-const char* PROGRAM_CODE = "CIab+-_#*@/|";
+const char* PROGRAM_CODE = "1CIab+-_#*@/|";
 #endif
+
+#if defined POLYNOMIAL_OPS
+enum OPS {ONE, CONST, A, B, PLUS, MINUS, RMINUS, CPLUS, TIMES, CTIMES, CPOW, NOPS};
+enum UNUSED_OPS { SQR=-999, ONE, LOG, EXP, POW,  RPOW, CRPOW, SQRT, SIN, ASIN, COS, ACOS, TAN, ATAN, GAMMA,  ABS, BESSEL, DIV, RDIV, INV};
+const char* PROGRAM_CODE = "1CAB+-_#*@^";
+#endif
+
+
+#if defined LINEAR_OPS
+enum OPS {ONE, CONST, A, B, PLUS, MINUS, RMINUS, CPLUS, CTIMES, NOPS};
+enum UNUSED_OPS { SQR=-999, ONE, LOG, EXP, POW,  RPOW, CRPOW, SQRT, SIN, ASIN, COS, ACOS, TAN, ATAN, GAMMA,  ABS, BESSEL, DIV, RDIV, INV, TIMES, CPOW};
+const char* PROGRAM_CODE = "1CAB+-_#@";
+#endif
+
 
 // debugging
 // enum OPS { CONST, A, B, CPLUS, CTIMES,   NOPS};
@@ -99,7 +113,7 @@ static struct option long_options[] =
         {"sdscale",      required_argument,    NULL, 'r'},
         {"first-half",   no_argument,    NULL, 'f'},
         {"even-half",    no_argument,    NULL, 'e'},        
-        {"show-constantsf",    no_argument,    NULL, 'C'},        
+        {"show-constants",    no_argument,    NULL, 'C'},        
         {"quiet",        no_argument,    NULL, 'q'},
         {"all",    no_argument,    NULL, '_'},
         {NULL, 0, 0, 0} // zero row for bad arguments
@@ -157,6 +171,8 @@ int process_arguments(int argc, char** argv) {
 
 #define is_valid(x) (!is_invalid(x))
 #define is_invalid(x) (isnan(x) || (!isfinite(x))) 
+// #define is_invalid(x) ( x==1.0/0.0 || x==0.0/0.0)
+    
 
  #define max(a,b) \
    ({ typeof (a) _a = (a); \
@@ -315,7 +331,7 @@ vector<datum>* load_data_file(const char* datapath, int FIRST_HALF_DATA, int EVE
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 // define a template to fold any function over  
-template<class T> __device__ T program_fold(int N, int idx, op* P, data_t* C, T leaf, T dispatch(op,T,T,T) ) {
+template<class T> __device__ __host__ T program_fold(int N, int idx, op* P, data_t* C, T leaf, T dispatch(op,T,T,T) ) {
    T buf[PROGRAM_LENGTH+1]; // we'll waste one space here at the beginning to simplify everything else
     
     for(int i=PROGRAM_LENGTH;i>=1;i--) { // start at the last node, but with +1 indexing
@@ -405,7 +421,8 @@ __device__ bayes_t compute_likelihood(int N, int idx, op* P, data_t* C, datum* D
 // Compute the prior
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-__device__ float dispatch_length(op o, float a, float b, float c__unusued) {
+
+__device__ __host__ float dispatch_length(op o, float a, float b, float c__unusued) {
     // count up the length for the prior
     // c is unused
         switch(o) {
@@ -415,11 +432,11 @@ __device__ float dispatch_length(op o, float a, float b, float c__unusued) {
             case A:      return a; 
             case B:      return b; // need both since of how consts are passed in
             case PLUS:   return 1+a+b;
-            case CPLUS:  return CONST_LENGTH_PRIOR+a;
+            case CPLUS:  return CONST_LENGTH_PRIOR+a+1;
             case MINUS:  return 1+a+b;
             case RMINUS: return 1+b+a;
             case TIMES:  return 1+a+b;
-            case CTIMES: return CONST_LENGTH_PRIOR+a;
+            case CTIMES: return CONST_LENGTH_PRIOR+a+1;
             case DIV:    return 1+a+b;
             case RDIV:   return 1+a+b;
             case SQRT:   return 1+a;
@@ -433,13 +450,13 @@ __device__ float dispatch_length(op o, float a, float b, float c__unusued) {
             case ATAN:   return 1+a;
             case EXP:    return 1+a;
             case POW:    return 1+a+b;
-            case CPOW:   return CONST_LENGTH_PRIOR+a;
+            case CPOW:   return CONST_LENGTH_PRIOR+a+1;
             case RPOW:   return 1+b+a;
-            case CRPOW:  return CONST_LENGTH_PRIOR+a;
+            case CRPOW:  return CONST_LENGTH_PRIOR+a+1;
             case GAMMA:  return 1+a;
             case BESSEL: return 1+a;
             case ABS:    return 1+a;
-            default:     return CUDART_NAN_F;
+            default:     return 0.0/0.0; // nan CUDART_NAN_F
         }    
 }
 
@@ -459,6 +476,40 @@ __device__ bayes_t compute_prior(int N, int idx, op* P, data_t* C) {
     
     return prior;
     
+}
+
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// If we want to compute polynomial degrees
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+__host__ float dispatch_degree(op o, float a, float b, float c) {
+    // give the polynomial degree if it only uses polynomial ops,
+    // otherwise INFINITY
+    
+    switch(o) {
+            case ONE:    return 0;
+            case CONST:  return 0;
+            case A:      return a; 
+            case B:      return b;
+            case PLUS:   return max(a,b);
+            case CPLUS:  return a;
+            case MINUS:  return max(a,b);
+            case RMINUS: return max(a,b);
+            case TIMES:  return a+b;
+            case CTIMES: return a;
+            case CPOW:   return a*c; 
+            case POW:    return (b==0.0) ? a*c : 1.0/0.0; // x^C
+            case DIV:    return (b==0.0) ? a : 1.0/0.0; // we can divide by constants
+            
+            
+            // TODO: WE CAN INCLDUE THINGS LIKE COS(C), we just have to pass zeros through, not xes
+            
+            default:     return 1.0/0.0; // return inf 
+        }    
+}
+__host__ float polynomial_degree(int N, int idx, op* P, data_t* C) {
+  return program_fold<float>(N, idx, P, C, 1, dispatch_degree);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -682,6 +733,19 @@ void displaystring(const char* const_format, int N, int idx, op* P, data_t* C, F
 // --------------------------------------------------------------------------------------------------------------
 // --------------------------------------------------------------------------------------------------------------
 
+const int PROGRESS_BAR_WIDTH = 70;
+void progress_bar(float pct) {
+    fprintf(stderr, "\r[");
+    for(int p=0;p<PROGRESS_BAR_WIDTH;p++) { 
+        if(p <= pct * PROGRESS_BAR_WIDTH) 
+            fprintf(stderr,"=");
+        else 
+            fprintf(stderr," ");
+        
+    }
+    fprintf(stderr, "]");
+}
+
 
 int main(int argc, char** argv)
 {   
@@ -712,12 +776,18 @@ int main(int argc, char** argv)
     int deviceCount = 0;
     cudaGetDeviceCount(&deviceCount);
     if(WHICH_GPU <= deviceCount) {
-        cudaSetDevice(WHICH_GPU);
+        cudaError_t err = cudaSetDevice(WHICH_GPU);
+        if(err != cudaSuccess)
+            printf("CUDA error: %s\n", cudaGetErrorString(err));
     }
     else {
         cerr << "Invalid GPU device " << WHICH_GPU << endl;
         return 1;
     }
+    int wgpu; cudaGetDevice(&wgpu);
+    
+    
+    cudaDeviceReset();
     
     // -----------------------------------------------------------------------
     // Set up the blocks
@@ -737,11 +807,19 @@ int main(int argc, char** argv)
     // -------------------------------------------------------------------------
     // Make the RNG replicable
     
-    if(seed==-1) { srand(time(NULL));  }
-    else{          srand(seed); }
+    if(seed==-1) { 
+        seed = time(NULL);
+    }
+   
+    // -----------------------------------------------------------------------
+    // Read the data and set up some arrays
+    // -----------------------------------------------------------------------
     
-    seed = rand();
-
+    vector<datum>* data_vec = load_data_file(in_file_path.c_str(), FIRST_HALF_DATA, EVEN_HALF_DATA);
+    datum* host_D = &((*data_vec)[0]); // can do this with vectors now
+    int ndata = data_vec->size();
+    
+    
     // -------------------------------------------------------------------------
     // Log
     
@@ -760,15 +838,12 @@ int main(int argc, char** argv)
     fprintf(fp, "# \tSeed: %i\n", seed);
     fprintf(fp, "# \tMax program length: %i\n", PROGRAM_LENGTH);
     fprintf(fp, "# \tN Constants: %i\n", NCONSTANTS);
+    fprintf(fp, "# \t GPU: %i\n", wgpu);
+    fprintf(fp, "# \t Number of data points: %i\n", ndata);
     fprintf(fp, "#\n#\n");
     
-    // -----------------------------------------------------------------------
-    // Read the data and set up some arrays
-    // -----------------------------------------------------------------------
-    
-    vector<datum>* data_vec = load_data_file(in_file_path.c_str(), FIRST_HALF_DATA, EVEN_HALF_DATA);
-    datum* host_D = &((*data_vec)[0]); // can do this with vectors now
-    int ndata = data_vec->size();
+    // set up the seed
+    srand(seed);
     
     
     // Echo the data we actually run with (post-filtering for even/firsthalf)
@@ -809,7 +884,9 @@ int main(int argc, char** argv)
     // Run
     // -----------------------------------------------------------------------
     
-    // Set the specifications
+    if(! QUIET) {progress_bar(0.0); }
+    
+    // main outer loop
     for(int o=0;o<outer;o++) {
         
         // run this many steps
@@ -830,7 +907,15 @@ int main(int argc, char** argv)
             for(int h=0;h<N;h++) {
                 fprintf(fp, "%d\t%d\t", h, o);
                 
-                fprintf(fp, "%.5f\t%.5f\t%.5f\t", host_prior[h]+host_likelihood[h], host_prior[h], host_likelihood[h]);
+                fprintf(fp, "%.3f\t%.3f\t%.3f\t", host_prior[h]+host_likelihood[h], host_prior[h], host_likelihood[h]);
+ 
+                fprintf(fp, "%.1f\t",  program_fold<float>(N, h, host_P, host_C, X_LENGTH_PRIOR, dispatch_length));
+                
+                // print the degree
+                float deg = polynomial_degree(N, h, host_P, host_C);
+                if(deg == 1.0/0.0) { fprintf(fp, "NA\t"); }
+                else{                fprintf(fp, "%.2f\t", deg);}
+
                 
                 fprintf(fp, "\"");
                 displaystring("C", N, h, host_P, host_C, fp);
@@ -844,6 +929,7 @@ int main(int argc, char** argv)
                     fprintf(fp, "%c", PROGRAM_CODE[host_P[h+N*i]]);
                 }
                 fprintf(fp, "\"\t");    
+                
                 
                 if(SHOW_CONSTANTS) {
                     for(int c=0;c<NCONSTANTS;c++){ 
@@ -879,25 +965,13 @@ int main(int argc, char** argv)
         cudaMemcpy(device_C, host_C, N*NCONSTANTS*sizeof(data_t), cudaMemcpyHostToDevice);  CUDA_CHECK();
         
         // print a progress bar to stderr
-        if(!QUIET) {
-            int BAR_WIDTH = 70;
-            fprintf(stderr, "\r[");
-            for(int p=0;p<BAR_WIDTH;p++) { 
-                if(p <= o * BAR_WIDTH/outer) fprintf(stderr,"=");
-                else                         fprintf(stderr," ");
-                
-            }
-            fprintf(stderr, "]");
-        }
+        if(! QUIET) {progress_bar(float(o)/float(outer)); }
+          
     }
     
-    if(!QUIET) {
-        // finish printing this since it makes steve happy
-        int BAR_WIDTH = 70;
-        fprintf(stderr, "\r[");
-        for(int p=0;p<BAR_WIDTH;p++) { fprintf(stderr,"=");}
-        fprintf(stderr, "]");
-    }
+    
+    // finish printing this since it makes steve happy
+    if(! QUIET) {progress_bar(1.1); }
         
     // -----------------------------------------------------------------------
     // Cleanup
