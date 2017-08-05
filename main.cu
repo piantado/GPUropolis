@@ -35,7 +35,7 @@ const float P_PROPOSE_C_GEOMETRIC = 0.2; // how often do we propose setting a co
 const float PROPOSE_GEOM_R = 0.1; // higher means we propose to higher integers (geometric rate on proposal)
             
 
-const float resample_threshold = 10.0; // hypotheses more than this far from the MAP get resampled every outer block
+// const float resample_threshold = 10.0; // hypotheses more than this far from the MAP get resampled every outer block
 
 // Setup for gpu hardware 
 const unsigned int BLOCK_SIZE = 128; // empirically determined to work well
@@ -281,21 +281,22 @@ int random_int_host(int limit) {
    
 // Load data froma  file, putting it into our structs.
 // This allows us to trim our data if we want
-vector<datum>* load_data_file(const char* datapath, int FIRST_HALF_DATA, int EVEN_HALF_DATA) {
+vector<datum>* load_data_file(const char* datapath, const int FIRST_HALF_DATA, const int EVEN_HALF_DATA) {
 
 	FILE* fp = fopen(datapath, "r");
 	if(fp==NULL) { cerr << "*** ERROR: Cannot open file:\t" << datapath <<"\n"; exit(1);}
 	
 	vector<datum>* d = new vector<datum>();
-	char* line = NULL; size_t len=0; data_t x,y,sd; 
+	char* line = NULL; size_t len=0; 
+	double x,y,sd; // load as doubles so scanf works and then cast to bayes_t 
 	while( getline(&line, &len, fp) != -1) {
 		if( line[0] == '#' ) continue;  // skip comments
-		else if (sscanf(line, "%f\t%f\t%f\n", &x, &y, &sd) == 3) { // floats
+		else if (sscanf(line, "%lf\t%lf\t%lf\n", &x, &y, &sd) == 3) { // floats
                         sd = sdscale*sd;
 			d->push_back( (datum){.x=(data_t)x, .y=(data_t)y, .sd=(data_t)sd} );
                         assert((data_t)sd > 0.0);
 		}
-		else if (sscanf(line, "%e\t%e\t%e\n", &x, &y, &sd) == 3) { // scientific notation
+		else if (sscanf(line, "%le\t%le\t%le\n", &x, &y, &sd) == 3) { // scientific notation
                         sd = sdscale*sd;
 			d->push_back( (datum){.x=(data_t)x, .y=(data_t)y, .sd=(data_t)sd} );
                         assert((data_t)sd > 0.0);
@@ -329,6 +330,7 @@ vector<datum>* load_data_file(const char* datapath, int FIRST_HALF_DATA, int EVE
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Run programs
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+ 
 
 // define a template to fold any function over  
 template<class T> __device__ __host__ T program_fold(int N, int idx, op* P, data_t* C, T leaf, T dispatch(op,T,T,T) ) {
@@ -733,6 +735,17 @@ void displaystring(const char* const_format, int N, int idx, op* P, data_t* C, F
 // --------------------------------------------------------------------------------------------------------------
 // --------------------------------------------------------------------------------------------------------------
 
+// for comparing bayes_t types (computing the median)
+int cmp(const void *a, const void* b) { 
+    bayes_t ap = *static_cast<const bayes_t*>(a);
+    bayes_t bp = *static_cast<const bayes_t*>(b); 
+    
+    // use != here to check for nan:
+    if( ap>bp || (bp!=bp) ) { return 1; }
+    if( ap<bp || (ap!=ap) ) { return -1; }
+    return 0;
+}
+
 const int PROGRESS_BAR_WIDTH = 70;
 void progress_bar(float pct) {
     fprintf(stderr, "\r[");
@@ -942,16 +955,15 @@ int main(int argc, char** argv)
             fclose(fp);
         }
         
-        // find the MAP so far
-        bayes_t map_so_far = -9e99;
-        for(int h=0;h<N;h++) { 
-            if(host_prior[h]+host_likelihood[h] > map_so_far) 
-                map_so_far = host_prior[h]+host_likelihood[h];
-        }
+        // find the median 
+	bayes_t host_posterior[N];
+	for(int h=0;h<N;h++) host_posterior[h] = host_prior[h]+host_likelihood[h];
+	qsort( (void*)host_posterior, N, sizeof(bayes_t), cmp);
+	bayes_t median = host_posterior[N/2];
         
-        // Now resample from the prior if we are too bad
+        // Now resample from the prior if we are too bad -- worse than the median
         for(int h=0;h<N;h++) {
-            if(host_prior[h]+host_likelihood[h] < map_so_far - resample_threshold) {
+            if(host_prior[h]+host_likelihood[h] < median) {
                 // randomize
                 for(int i=0;i<PROGRAM_LENGTH;i++) host_P[h+i*N] = random_int_host(NOPS-1);
                 for(int i=0;i<NCONSTANTS;i++)   {
