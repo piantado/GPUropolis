@@ -23,15 +23,16 @@ using namespace std;
 
 const float PRIOR_MULTIPLIER = 1.0; // prior is exp(-PRIOR_MULTIPLIER * length) 
 const float CONST_LENGTH_PRIOR = 1.0; // how much do constants cost in terms of length?
+const float PHYSICAL_CONSTANT_LENGTH_PRIOR = 1.0;
 const float X_LENGTH_PRIOR = 1.0; // how much does X cost in terms of length?
 
-const int PROGRAM_LENGTH = 15; // how many operations do we allow? This is the max index of the program array. 
-const int NCONSTANTS     = 15; // each op may use a constant if it wants (but most do not)
+const int PROGRAM_LENGTH = 31; // how many operations do we allow? This is the max index of the program array. 
+const int NCONSTANTS     = 31; // each op may use a constant if it wants (but most do not)
 
 const float CONSTANT_SCALE = 1.0; // Scales the constants in the prior
 const int C_MAX_ORDER = 4; //  constants are chosen with scales between 10^C_MIN_ORDER and 10^C_MAX_ORDER
 const int C_MIN_ORDER = -4; 
-const float P_PROPOSE_C_GEOMETRIC = 0.2; // how often do we propose setting a constant to zero?
+const float P_PROPOSE_C_GEOMETRIC = 1.0; // how often do we propose setting a constant to an integer?
 const float PROPOSE_GEOM_R = 0.1; // higher means we propose to higher integers (geometric rate on proposal)
             
 
@@ -50,30 +51,41 @@ typedef double bayes_t; // when we compute Bayesian things (priors, likelihoods,
 typedef struct datum { data_t x; data_t y; data_t sd; } datum; // A structure to hold data: x,y,stdev pairs 
 
 // Choose the set of operations
-#if !defined SIMPLIFIED_OPS and !defined POLYNOMIAL_OPS
+#if !defined SIMPLIFIED_OPS and !defined POLYNOMIAL_OPS and !defined PHYSICAL_CONSTANTS
 //            C     I   a  b   +      -       _       #      *      @      /    |     L    E    ^     p    V      P     R     S     s    C    c      T    t     G      A    B
 enum OPS {ONE, CONST, INV, A, B, PLUS, MINUS, RMINUS, CPLUS, TIMES, CTIMES, DIV, RDIV, LOG, EXP, POW, CPOW, RPOW, CRPOW, SQRT, SIN, ASIN, COS, ACOS, TAN, ATAN,  ABS, NOPS};
-enum UNUSED_OPS { SQR=-999, GAMMA, BESSEL};
+enum UNUSED_OPS { SQR=-999,  LOGOF2, HALF, E, PI, CLIGHT, G, HBAR, MU0, EL,  MP, ME, E0, KB, GAMMA, BESSEL};
 const char* PROGRAM_CODE = "1CIab+-_#*@/|LE^pVPRSsCcTtA"; // if we want to print a concise description of the program (mainly for debugging) These MUST be algined with OPS
 #endif
 
 #if defined SIMPLIFIED_OPS
 enum OPS {ONE, CONST, INV, A, B, PLUS, MINUS, RMINUS, CPLUS, TIMES, CTIMES, DIV, RDIV, NOPS};
-enum UNUSED_OPS { SQR=-999, ONE, LOG, EXP, POW, CPOW, RPOW, CRPOW, SQRT, SIN, ASIN, COS, ACOS, TAN, ATAN, GAMMA,  ABS, BESSEL};
+enum UNUSED_OPS { SQR=-999,  LOGOF2, HALF, E, PI, CLIGHT, G, HBAR, MU0, EL,  MP, ME, E0, KB, ONE, LOG, EXP, POW, CPOW, RPOW, CRPOW, SQRT, SIN, ASIN, COS, ACOS, TAN, ATAN, GAMMA,  ABS, BESSEL};
 const char* PROGRAM_CODE = "1CIab+-_#*@/|";
 #endif
 
 #if defined POLYNOMIAL_OPS
 enum OPS {ONE, CONST, A, B, PLUS, MINUS, RMINUS, CPLUS, TIMES, CTIMES, CPOW, NOPS};
-enum UNUSED_OPS { SQR=-999, ONE, LOG, EXP, POW,  RPOW, CRPOW, SQRT, SIN, ASIN, COS, ACOS, TAN, ATAN, GAMMA,  ABS, BESSEL, DIV, RDIV, INV};
+enum UNUSED_OPS { SQR=-999,  LOGOF2, HALF E, PI, CLIGHT, G, HBAR, MU0, EL,  MP, ME, E0, KB, ONE, LOG, EXP, POW,  RPOW, CRPOW, SQRT, SIN, ASIN, COS, ACOS, TAN, ATAN, GAMMA,  ABS, BESSEL, DIV, RDIV, INV};
 const char* PROGRAM_CODE = "1CAB+-_#*@^";
 #endif
 
 
 #if defined LINEAR_OPS
 enum OPS {ONE, CONST, A, B, PLUS, MINUS, RMINUS, CPLUS, CTIMES, NOPS};
-enum UNUSED_OPS { SQR=-999, ONE, LOG, EXP, POW,  RPOW, CRPOW, SQRT, SIN, ASIN, COS, ACOS, TAN, ATAN, GAMMA,  ABS, BESSEL, DIV, RDIV, INV, TIMES, CPOW};
+enum UNUSED_OPS { SQR=-999, LOGOF2, HALF, E, PI, CLIGHT, G, HBAR, MU0, EL,  MP, ME, E0, KB, ONE, LOG, EXP, POW,  RPOW, CRPOW, SQRT, SIN, ASIN, COS, ACOS, TAN, ATAN, GAMMA,  ABS, BESSEL, DIV, RDIV, INV, TIMES, CPOW};
 const char* PROGRAM_CODE = "1CAB+-_#@";
+#endif
+
+
+#if defined PHYSICAL_CONSTANTS
+// see https://en.wikipedia.org/wiki/Physical_constant
+// enum OPS {ONE, E, PI, CLIGHT, G, HBAR, MU0, EL,  MP, ME,   CONST, INV, A, B, PLUS, MINUS, RMINUS, CPLUS, TIMES, CTIMES, DIV, RDIV, LOG, EXP, POW, CPOW, RPOW, CRPOW, SQRT, SIN, ASIN, COS, ACOS, TAN, ATAN,  ABS,     NOPS };
+// enum UNUSED_OPS { SQR=-999, GAMMA, BESSEL};
+enum OPS {LOGOF2, HALF, E, PI, CLIGHT, G, HBAR, MU0, EL,  MP, ME, E0, KB, A,B,  PLUS, MINUS, RMINUS, TIMES, NOPS };
+
+enum UNUSED_OPS { SQR=-999, ONE, GAMMA, BESSEL,  CONST, INV, LOG, EXP, POW, CPLUS,CTIMES, CPOW, RPOW, CRPOW, SQRT, SIN, ASIN, COS, ACOS, TAN, ATAN,  ABS,  DIV, RDIV };
+const char* PROGRAM_CODE = "B2epcghm:o.~Kab+-_*";
 #endif
 
 
@@ -391,6 +403,19 @@ __device__ data_t dispatch_eval(op o, data_t a, data_t b, data_t C) {
             case GAMMA:  return tgammaf(a);
             case BESSEL: return j0f(a);
             case ABS:    return fabsf(a);
+            case E:      return 1.6021766208e-19; // 1.6021766208e-19; // elementary charge
+            case PI:     return 1.14472988584915; // 3.141592653589; // TAU/2
+            case CLIGHT: return 19.5186009865452; // 299792458; // speed of light
+            case G:      return -23.4302046558627; // 6.67408e-11; // gravitational constant
+            case HBAR:   return -78.2347583540371; // 1.054571800e-34; // reduced planck's constant
+            case MU0:    return -13.5870714043359; // 1.256637061e-6; // magnetic constant
+            case EL:     return -43.2777536741305; // 1.6021766208e-19; //elementary charge
+            case MP:     return -61.6554051167679; // 1.672621898e-27; // proton mass
+            case ME:     return -69.1708328401338; // 9.10938356e-31; // electron mass
+            case E0:     return -25.4501305691713; // epsilon_0, vacuum permittivity
+            case KB:     return -52.6369038080531; // bolzman constant
+            case LOGOF2: return log(2.0);
+            case HALF:   return a/2.0;
             default:     return CUDART_NAN_F;
         }    
 }
@@ -422,44 +447,6 @@ __device__ bayes_t compute_likelihood(int N, int idx, op* P, data_t* C, datum* D
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Compute the prior
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-/*
-__device__ __host__ float dispatch_length(op o, float a, float b, float c__unusued) {
-    // count up the length for the prior
-    // c is unused
-        switch(o) {
-            case ONE:    return 1;
-            case CONST:  return CONST_LENGTH_PRIOR;
-            case INV:    return 1+a;
-            case A:      return a; 
-            case B:      return b; // need both since of how consts are passed in
-            case PLUS:   return 1+a+b;
-            case CPLUS:  return CONST_LENGTH_PRIOR+a+1;
-            case MINUS:  return 1+a+b;
-            case RMINUS: return 1+b+a;
-            case TIMES:  return 1+a+b;
-            case CTIMES: return CONST_LENGTH_PRIOR+a+1;
-            case DIV:    return 1+a+b;
-            case RDIV:   return 1+a+b;
-            case SQRT:   return 2+a;
-            case SQR:    return 2+a;
-            case LOG:    return 2+a;
-            case SIN:    return 2+a;
-            case ASIN:   return 2+a;
-            case COS:    return 2+a;
-            case ACOS:   return 2+a;
-            case TAN:    return 2+a;
-            case ATAN:   return 2+a;
-            case EXP:    return 2+a;
-            case POW:    return 2+a+b;
-            case CPOW:   return CONST_LENGTH_PRIOR+a+2;
-            case RPOW:   return 2+b+a;
-            case CRPOW:  return CONST_LENGTH_PRIOR+a+2;
-            case GAMMA:  return 3+a;
-            case BESSEL: return 3+a;
-            case ABS:    return 2+a;
-            default:     return 0.0/0.0; // nan CUDART_NAN_F
-        }    
-}*/
 
 __device__ __host__ float dispatch_length(op o, float a, float b, float c__unusued) {
     // count up the length for the prior
@@ -495,6 +482,19 @@ __device__ __host__ float dispatch_length(op o, float a, float b, float c__unusu
             case GAMMA:  return 1+a;
             case BESSEL: return 1+a;
             case ABS:    return 1+a;
+            case E:      return PHYSICAL_CONSTANT_LENGTH_PRIOR; // elementary charge
+            case PI:     return PHYSICAL_CONSTANT_LENGTH_PRIOR; // TAU/2
+            case CLIGHT: return PHYSICAL_CONSTANT_LENGTH_PRIOR; // speed of light
+            case G:      return PHYSICAL_CONSTANT_LENGTH_PRIOR; // gravitational constant
+            case HBAR:   return PHYSICAL_CONSTANT_LENGTH_PRIOR; // reduced planck's constant
+            case MU0:    return PHYSICAL_CONSTANT_LENGTH_PRIOR; // magnetic constant
+            case EL:     return PHYSICAL_CONSTANT_LENGTH_PRIOR; //elementary charge
+            case MP:     return PHYSICAL_CONSTANT_LENGTH_PRIOR; // proton mass
+            case ME:     return PHYSICAL_CONSTANT_LENGTH_PRIOR; // electron mass
+            case LOGOF2: return PHYSICAL_CONSTANT_LENGTH_PRIOR;
+            case HALF:   return 1+a;
+            case E0:     return PHYSICAL_CONSTANT_LENGTH_PRIOR;
+            case KB:     return PHYSICAL_CONSTANT_LENGTH_PRIOR;
             default:     return 0.0/0.0; // nan CUDART_NAN_F
         }    
 }
@@ -540,7 +540,19 @@ __host__ float dispatch_degree(op o, float a, float b, float c) {
             case CPOW:   return a*c; 
             case POW:    return (b==0.0) ? a*c : 1.0/0.0; // x^C
             case DIV:    return (b==0.0) ? a : 1.0/0.0; // we can divide by constants
-            
+            case E:      return 0; // elementary charge
+            case PI:     return 0; // TAU/2
+            case CLIGHT: return 0; // speed of light
+            case G:      return 0; // gravitational constant
+            case HBAR:   return 0; // reduced planck's constant
+            case MU0:    return 0; // magnetic constant
+            case EL:     return 0; //elementary charge
+            case MP:     return 0; // proton mass
+            case ME:     return 0; // electron mass  
+            case LOGOF2: return 0; 
+            case HALF:   return a;
+            case E0:     return 0;
+            case KB:     return 0;
             
             // TODO: WE CAN INCLDUE THINGS LIKE COS(C), we just have to pass zeros through, not xes
             
@@ -734,6 +746,24 @@ void string_dispatch( char* target, op o, const char* a, const char* b, const ch
             case GAMMA: strcat(target, "gamma("); strcat(target,a); strcat(target, ")"); break;
             case BESSEL:strcat(target, "besselJ("); strcat(target, a); strcat(target, ",0)"); break;
             case ABS:   strcat(target, "abs("); strcat(target, a); strcat(target, ")"); break;
+            
+            
+            case E:      strcat(target, "E"); break; // elementary charge
+            case PI:     strcat(target, "PI"); break; // TAU/2
+            case CLIGHT: strcat(target, "CLIGHT"); break; // speed of light
+            case G:      strcat(target, "G"); break; // gravitational constant
+            case HBAR:   strcat(target, "HBAR"); break; // reduced planck's constant
+            case MU0:    strcat(target, "MU0"); break; // magnetic constant
+            case EL:     strcat(target, "EL"); break; //elementary charge
+            case MP:     strcat(target, "MP"); break; // proton mass
+            case ME:     strcat(target, "ME"); break; // electron mass
+            case E0:     strcat(target, "E0"); break; // electron mass
+            case KB:     strcat(target, "KB"); break; // electron mass
+            
+            case LOGOF2: strcat(target, "log(2.0)"); break;
+            case HALF:   strcat(target, "("); strcat(target, a); strcat(target, "/2.0)"); break;
+            
+            
             default:    strcat(target, "NAN"); break;
         }    
 }
@@ -1006,7 +1036,6 @@ int main(int argc, char** argv)
         // Now resample from the prior if we are too bad -- worse than the median
         for(int h=0;h<N;h++) {
             if(host_prior[h]+host_likelihood[h] < median) {
-//                 cerr << "trimming " << h << "\t" << median << "\t" << host_prior[h]+host_likelihood[h] << endl;
                 // randomize
                 for(int i=0;i<PROGRAM_LENGTH;i++) host_P[h+i*N] = random_int_host(NOPS-1);
                 for(int i=0;i<NCONSTANTS;i++)   {
@@ -1034,10 +1063,10 @@ int main(int argc, char** argv)
     
     fprintf(stderr, " Completed, cleaning up. \n");
     
-    delete[] host_P;
-    delete[] host_C;
-    delete[] host_prior;
-    delete[] host_likelihood;
+    cudaFreeHost(host_P);
+    cudaFreeHost(host_C);
+    cudaFreeHost(host_prior);
+    cudaFreeHost(host_likelihood);
     delete[] host_D;
     
 }
