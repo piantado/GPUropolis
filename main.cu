@@ -52,7 +52,7 @@ typedef struct datum { data_t x; data_t y; data_t sd; } datum; // A structure to
 // Choose the set of operations
 #if !defined SIMPLIFIED_OPS and !defined POLYNOMIAL_OPS
 //            C     I   a  b   +      -       _       #      *      @      /    |     L    E    ^     p    V      P     R     S     s    C    c      T    t     G      A    B
-enum OPS {ONE, CONST, INV, A, B, PLUS, MINUS, RMINUS, CPLUS, TIMES, CTIMES, DIV, RDIV, LOG, EXP, POW, CPOW, RPOW, CRPOW, SQRT, SIN, ASIN, COS, ACOS, TAN, ATAN,  ABS,  NOPS};
+enum OPS {ONE, CONST, INV, A, B, PLUS, MINUS, RMINUS, CPLUS, TIMES, CTIMES, DIV, RDIV, LOG, EXP, POW, CPOW, RPOW, CRPOW, SQRT, SIN, ASIN, COS, ACOS, TAN, ATAN,  ABS, NOPS};
 enum UNUSED_OPS { SQR=-999, GAMMA, BESSEL};
 const char* PROGRAM_CODE = "1CIab+-_#*@/|LE^pVPRSsCcTtA"; // if we want to print a concise description of the program (mainly for debugging) These MUST be algined with OPS
 #endif
@@ -422,7 +422,44 @@ __device__ bayes_t compute_likelihood(int N, int idx, op* P, data_t* C, datum* D
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Compute the prior
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
+/*
+__device__ __host__ float dispatch_length(op o, float a, float b, float c__unusued) {
+    // count up the length for the prior
+    // c is unused
+        switch(o) {
+            case ONE:    return 1;
+            case CONST:  return CONST_LENGTH_PRIOR;
+            case INV:    return 1+a;
+            case A:      return a; 
+            case B:      return b; // need both since of how consts are passed in
+            case PLUS:   return 1+a+b;
+            case CPLUS:  return CONST_LENGTH_PRIOR+a+1;
+            case MINUS:  return 1+a+b;
+            case RMINUS: return 1+b+a;
+            case TIMES:  return 1+a+b;
+            case CTIMES: return CONST_LENGTH_PRIOR+a+1;
+            case DIV:    return 1+a+b;
+            case RDIV:   return 1+a+b;
+            case SQRT:   return 2+a;
+            case SQR:    return 2+a;
+            case LOG:    return 2+a;
+            case SIN:    return 2+a;
+            case ASIN:   return 2+a;
+            case COS:    return 2+a;
+            case ACOS:   return 2+a;
+            case TAN:    return 2+a;
+            case ATAN:   return 2+a;
+            case EXP:    return 2+a;
+            case POW:    return 2+a+b;
+            case CPOW:   return CONST_LENGTH_PRIOR+a+2;
+            case RPOW:   return 2+b+a;
+            case CRPOW:  return CONST_LENGTH_PRIOR+a+2;
+            case GAMMA:  return 3+a;
+            case BESSEL: return 3+a;
+            case ABS:    return 2+a;
+            default:     return 0.0/0.0; // nan CUDART_NAN_F
+        }    
+}*/
 
 __device__ __host__ float dispatch_length(op o, float a, float b, float c__unusued) {
     // count up the length for the prior
@@ -851,8 +888,8 @@ int main(int argc, char** argv)
     fprintf(fp, "# \tSeed: %i\n", seed);
     fprintf(fp, "# \tMax program length: %i\n", PROGRAM_LENGTH);
     fprintf(fp, "# \tN Constants: %i\n", NCONSTANTS);
-    fprintf(fp, "# \t GPU: %i\n", wgpu);
-    fprintf(fp, "# \t Number of data points: %i\n", ndata);
+    fprintf(fp, "# \tGPU: %i\n", wgpu);
+    fprintf(fp, "# \tNumber of data points: %i\n", ndata);
     fprintf(fp, "#\n#\n");
     
     // set up the seed
@@ -872,10 +909,15 @@ int main(int argc, char** argv)
     // Set up all the programs locally
     // -----------------------------------------------------------------------
     
-    op*    host_P =   new op[N*PROGRAM_LENGTH];
-    data_t* host_C =  new data_t[N*NCONSTANTS];
-    bayes_t* host_prior =  new bayes_t[N];
-    bayes_t* host_likelihood =  new bayes_t[N]; 
+    op*    host_P;             cudaMallocHost((void**)&host_P, sizeof(op)*N*PROGRAM_LENGTH); // new op[N*PROGRAM_LENGTH];
+    CUDA_CHECK();
+    data_t* host_C;            cudaMallocHost((void**)&host_C, sizeof(data_t)*N*NCONSTANTS); // new data_t[N*NCONSTANTS];
+    CUDA_CHECK();
+    bayes_t* host_prior;       cudaMallocHost((void**)&host_prior, sizeof(bayes_t)*N); // new bayes_t[N];
+    CUDA_CHECK();
+    bayes_t* host_likelihood;  cudaMallocHost((void**)&host_likelihood, sizeof(bayes_t)*N); // new bayes_t[N]; 
+    CUDA_CHECK();
+
     
     for(int i=0;i<PROGRAM_LENGTH*N;i++) host_P[i] = random_int_host(NOPS-1);
     for(int i=0;i<NCONSTANTS*N;i++)    {
@@ -964,6 +1006,7 @@ int main(int argc, char** argv)
         // Now resample from the prior if we are too bad -- worse than the median
         for(int h=0;h<N;h++) {
             if(host_prior[h]+host_likelihood[h] < median) {
+//                 cerr << "trimming " << h << "\t" << median << "\t" << host_prior[h]+host_likelihood[h] << endl;
                 // randomize
                 for(int i=0;i<PROGRAM_LENGTH;i++) host_P[h+i*N] = random_int_host(NOPS-1);
                 for(int i=0;i<NCONSTANTS;i++)   {
