@@ -34,9 +34,8 @@ const int C_MAX_ORDER = 4; //  constants are chosen with scales between 10^C_MIN
 const int C_MIN_ORDER = -4; 
 const float P_PROPOSE_C_GEOMETRIC = 1.0; // how often do we propose setting a constant to an integer?
 const float PROPOSE_GEOM_R = 0.1; // higher means we propose to higher integers (geometric rate on proposal)
-            
 
-// const float resample_threshold = 10.0; // hypotheses more than this far from the MAP get resampled every outer block
+const float RESAMPLE_QUANTILE = 0.5; // sort by posterior and resample everything less than this quantile
 
 // Setup for gpu hardware 
 const unsigned int BLOCK_SIZE = 128; // empirically determined to work well
@@ -196,6 +195,11 @@ int process_arguments(int argc, char** argv) {
     
 #define PIf 3.141592653589 
  
+//
+// Device random functions
+// all have RNG_DEF (unlike host, which uses rand())
+//
+   
 /* These macros allow us to use RNG_DEF and RNG_ARGS in function calls, and swap out 
  * for other variable sif we want to. e.g. 
  * 	int rand(int n, RNG_DEF){
@@ -207,13 +211,13 @@ int process_arguments(int argc, char** argv) {
 
 #define MY_RAND_MAX ((1U << 31) - 1)
 
-// rand call on CUDA
+
 __device__ __host__ int cuda_rand(RNG_DEF) {
    //http://rosettacode.org/wiki/Linear_congruential_generator#C
    return rx = (rx * 1103515245 + 12345) & MY_RAND_MAX; 
 }
 
-__device__ __host__ int random_int(int n, RNG_DEF) {
+__device__ int random_int(int n, RNG_DEF) {
      // number in [0,(n-1)]
     int divisor = MY_RAND_MAX/(n+1);
     int retval;
@@ -225,10 +229,12 @@ __device__ __host__ int random_int(int n, RNG_DEF) {
     return retval;
 }
 
-__device__ __host__ float random_float(RNG_DEF) {
+__device__ float random_float(RNG_DEF) {
     return float(random_int(1000000, RNG_ARGS)) / 1000000.0;
 }
-// Generate a 0-mean random deviate with mean 0, sd 1
+
+
+// Generate a 0-mean normal deviate with mean 0, sd 1
 // This uses Box-muller so we don't need branching
 __device__ float random_normal(RNG_DEF) {
     float u = random_float(RNG_ARGS);
@@ -236,29 +242,54 @@ __device__ float random_normal(RNG_DEF) {
     return sqrtf(-2.0*logf(u)) * sinf(2.0*PIf*v);
 }
 
-float random_normal() {
-    float u = float(rand())/RAND_MAX;
-    float v = float(rand())/RAND_MAX;
-    return sqrtf(-2.0*log(u)) * sin(2.0*PIf*v);
-}
-
 __device__ float random_cauchy(RNG_DEF) {
-    float u = random_normal(RNG_ARGS);
-    float v = random_normal(RNG_ARGS);
-    return u/v;
+    float u = random_float(RNG_ARGS);
+    return tanf(PIf*(u-0.5));
 }
    
-float random_cauchy() {
-    float u = random_normal();
-    float v = random_normal();
-    return u/v;
-}
-
 __device__ float random_geometric(float r, RNG_DEF) {
     // From Devroye Example 2.2
     return ceilf(logf(random_float(RNG_ARGS)) / log(r));
 }
 
+
+//
+// Host random functions
+//
+
+
+__host__ int random_int(int limit) {
+//  from http://stackoverflow.com/questions/2999075/generate-a-random-number-within-range/2999130#2999130
+//   return a random number [0,limit).
+ 
+    int divisor = RAND_MAX/limit;
+    int retval;
+
+    do { 
+        retval = rand() / divisor;
+    } while (retval > limit-1);
+
+    return retval;
+}
+
+__host__ float random_float() {
+    return float(rand())/RAND_MAX;
+}
+
+__host__ float random_normal() {
+    float u = random_float();
+    float v = random_float();
+    return sqrtf(-2.0*log(u)) * sin(2.0*PIf*v);
+}
+
+__host__ float random_cauchy() {
+    float u = random_float();
+    return tanf(PIf*(u-0.5));
+}
+
+//
+// Probability densities
+//
    
 __device__ __host__ bayes_t lnormalpdf( float x, float s ){
     return -(x*x)/(2.0*s*s) - 0.5 * (logf(2.0*PIf) + 2.0*logf(s));
@@ -272,19 +303,6 @@ __device__ __host__ bayes_t lgeometricpdf(float n, float r) {
     return (n-1)*logf(r)+log(1.0-r);
 }
 
-int random_int_host(int limit) {
-//  from http://stackoverflow.com/questions/2999075/generate-a-random-number-within-range/2999130#2999130
-//   return a random number [0,limit).
- 
-    int divisor = RAND_MAX/(limit);
-    int retval;
-
-    do { 
-        retval = rand() / divisor;
-    } while (retval > limit-1);
-
-    return retval;
-}
 
 // -----------------------------------------------------------------------
 // Loading data
@@ -447,6 +465,59 @@ __device__ bayes_t compute_likelihood(int N, int idx, op* P, data_t* C, datum* D
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // Compute the prior
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+/*
+__device__ __host__ float dispatch_length(op o, float a, float b, float c__unusued) {
+    // count up the length for the prior
+    // c is unused
+        switch(o) {
+            case ONE:    return 0;
+            case CONST:  return CONST_LENGTH_PRIOR;
+            case INV:    return 1+a;
+            case A:      return a; 
+            case B:      return b; // need both since of how consts are passed in
+            case PLUS:   return 1+a+b;
+            case CPLUS:  return CONST_LENGTH_PRIOR+a+1;
+            case MINUS:  return 1+a+b;
+            case RMINUS: return 1+b+a;
+            case TIMES:  return 1+a+b;
+            case CTIMES: return CONST_LENGTH_PRIOR+a+1;
+            case DIV:    return 1+a+b;
+            case RDIV:   return 1+a+b;
+            case SQRT:   return 2+a;
+            case SQR:    return 2+a;
+            case LOG:    return 3+a;
+            case SIN:    return 3+a;
+            case ASIN:   return 3+a;
+            case COS:    return 3+a;
+            case ACOS:   return 3+a;
+            case TAN:    return 3+a;
+            case ATAN:   return 3+a;
+            case EXP:    return 2+a;
+            case POW:    return 2+a+b;
+            case CPOW:   return CONST_LENGTH_PRIOR+a+2;
+            case RPOW:   return 2+b+a;
+            case CRPOW:  return CONST_LENGTH_PRIOR+a+2;
+            case GAMMA:  return 4+a;
+            case BESSEL: return 4+a;
+            case ABS:    return 3+a;
+            case E:      return PHYSICAL_CONSTANT_LENGTH_PRIOR; // elementary charge
+            case PI:     return PHYSICAL_CONSTANT_LENGTH_PRIOR; // TAU/2
+            case CLIGHT: return PHYSICAL_CONSTANT_LENGTH_PRIOR; // speed of light
+            case G:      return PHYSICAL_CONSTANT_LENGTH_PRIOR; // gravitational constant
+            case HBAR:   return PHYSICAL_CONSTANT_LENGTH_PRIOR; // reduced planck's constant
+            case MU0:    return PHYSICAL_CONSTANT_LENGTH_PRIOR; // magnetic constant
+            case EL:     return PHYSICAL_CONSTANT_LENGTH_PRIOR; //elementary charge
+            case MP:     return PHYSICAL_CONSTANT_LENGTH_PRIOR; // proton mass
+            case ME:     return PHYSICAL_CONSTANT_LENGTH_PRIOR; // electron mass
+            case LOGOF2: return PHYSICAL_CONSTANT_LENGTH_PRIOR;
+            case HALF:   return 1+a;
+            case E0:     return PHYSICAL_CONSTANT_LENGTH_PRIOR;
+            case KB:     return PHYSICAL_CONSTANT_LENGTH_PRIOR;
+            default:     return 0.0/0.0; // nan CUDART_NAN_F
+        }    
+}*/
+
 
 __device__ __host__ float dispatch_length(op o, float a, float b, float c__unusued) {
     // count up the length for the prior
@@ -675,8 +746,7 @@ __global__ void MH_simple_kernel(int N, op* P, data_t* C, datum* D, int ndata, i
                     
                 }
                 else{
-                    // Most of our proposals are just normal centered on the current value. 
-                    
+                    // Most of our proposals are just normal centered on the current value.                     
                     int order = random_int(C_MAX_ORDER-C_MIN_ORDER,RNG_ARGS)+C_MIN_ORDER; // what order of magnitude?
                     C[i] = C[i] + CONSTANT_SCALE * powf(10.0,order) * random_normal(RNG_ARGS);        
                     fb = 0.0; // proposal is symmetric
@@ -757,8 +827,8 @@ void string_dispatch( char* target, op o, const char* a, const char* b, const ch
             case EL:     strcat(target, "EL"); break; //elementary charge
             case MP:     strcat(target, "MP"); break; // proton mass
             case ME:     strcat(target, "ME"); break; // electron mass
-            case E0:     strcat(target, "E0"); break; // electron mass
-            case KB:     strcat(target, "KB"); break; // electron mass
+            case E0:     strcat(target, "E0"); break; // electric constant (vacuum permitivity)
+            case KB:     strcat(target, "KB"); break; // bolzman constant
             
             case LOGOF2: strcat(target, "log(2.0)"); break;
             case HALF:   strcat(target, "("); strcat(target, a); strcat(target, "/2.0)"); break;
@@ -793,6 +863,83 @@ void displaystring(const char* const_format, int N, int idx, op* P, data_t* C, F
     fprintf(fp, "%s", buf[1]);
 }
 
+
+void latex_dispatch( char* target, op o, const char* a, const char* b, const char* C) {
+        switch(o) {
+            case ONE:   strcat(target, "1"); break;
+            case CONST: strcat(target, C); break;
+            case INV:   strcat(target, "1/"); strcat(target, a); strcat(target, ""); break;
+            case A:     strcat(target, a); break;
+            case B:     strcat(target, b); break;// need both since of how consts are passed in
+            case PLUS:  strcat(target, ""); strcat(target, a); strcat(target, "+"); strcat(target, b); strcat(target, ""); break;
+            case CPLUS: strcat(target, ""); strcat(target, a); strcat(target, "+"); strcat(target, C); strcat(target, ""); break;
+            case MINUS: strcat(target, ""); strcat(target, a); strcat(target, "-"); strcat(target, b); strcat(target, ""); break;
+            case RMINUS:strcat(target, ""); strcat(target, b); strcat(target, "-"); strcat(target, a); strcat(target, ""); break;
+            case TIMES: strcat(target, ""); strcat(target, b); strcat(target, "\\cdot "); strcat(target, a); strcat(target, ""); break;
+            case CTIMES:strcat(target, ""); strcat(target, a); strcat(target, "\\cdot "); strcat(target, C); strcat(target, ""); break;
+            case DIV:   strcat(target, "\\frac{"); strcat(target, a); strcat(target, "}{"); strcat(target, b); strcat(target, "}"); break;
+            case RDIV:  strcat(target, "\\frac{"); strcat(target, b); strcat(target, "}{"); strcat(target, a); strcat(target, "}"); break;
+            case LOG:   strcat(target, "\\log("); strcat(target, a); strcat(target, ")"); break;
+            case SIN:   strcat(target, "\\sin("); strcat(target, a); strcat(target, ")"); break;
+            case ASIN:  strcat(target, "\\asin("); strcat(target, a); strcat(target, ")"); break;
+            case COS:   strcat(target, "\\cos("); strcat(target, a); strcat(target, ")"); break;
+            case ACOS:  strcat(target, "\\acos("); strcat(target, a); strcat(target, ")"); break;
+            case TAN:   strcat(target, "\\tan("); strcat(target, a); strcat(target, ")"); break;
+            case ATAN:  strcat(target, "\\atan("); strcat(target, a); strcat(target, ")"); break;
+            case SQR:   strcat(target, "(("); strcat(target, a); strcat(target, ")^2)"); break;
+            case SQRT:  strcat(target, "\\sqrt{"); strcat(target, a); strcat(target, "}"); break;
+            case EXP:   strcat(target, "e^{"); strcat(target, a); strcat(target, "}"); break;
+            case POW:   strcat(target, ""); strcat(target, a); strcat(target, "^{"); strcat(target, b); strcat(target, "}"); break;
+            case CPOW:  strcat(target, ""); strcat(target, a); strcat(target, "^{"); strcat(target, C); strcat(target, "}"); break;
+            case RPOW:  strcat(target, ""); strcat(target, b); strcat(target, "^{"); strcat(target, a); strcat(target, "}"); break;
+            case CRPOW: strcat(target, ""); strcat(target, C); strcat(target, "^{"); strcat(target, a); strcat(target, "}"); break;
+            case GAMMA: strcat(target, "\\Gamma("); strcat(target,a); strcat(target, ")"); break;
+            case BESSEL:strcat(target, "J_0("); strcat(target, a); strcat(target, ",0)"); break;
+            case ABS:   strcat(target, "\\mid"); strcat(target, a); strcat(target, "\\mid"); break;
+            
+            
+            case E:      strcat(target, "e"); break; // elementary charge
+            case PI:     strcat(target, "\\pi"); break; // TAU/2
+            case CLIGHT: strcat(target, "c"); break; // speed of light
+            case G:      strcat(target, "G"); break; // gravitational constant
+            case HBAR:   strcat(target, "\\bar{h}"); break; // reduced planck's constant
+            case MU0:    strcat(target, "\\mu_0"); break; // magnetic constant
+            case EL:     strcat(target, "e_l"); break; //elementary charge
+            case MP:     strcat(target, "m_p"); break; // proton mass
+            case ME:     strcat(target, "m_e"); break; // electron mass
+            case E0:     strcat(target, "\\epsilon_0"); break; // electron mass
+            case KB:     strcat(target, "k_B"); break; // bolzman constant
+            
+            case LOGOF2: strcat(target, "\\log 2)"); break;
+            case HALF:   strcat(target, "("); strcat(target, a); strcat(target, "/2.0)"); break;
+            
+            
+            default:    strcat(target, "NAN"); break;
+        }    
+}
+
+
+void display_latex(const char* const_format, int N, int idx, op* P, data_t* C, FILE* fp){
+
+    for(int i=PROGRAM_LENGTH;i>=1;i--) { // start at the last node
+        int lidx = 2*i; // indices of the children
+        int ridx = 2*i+1;
+
+        strcpy(buf[i],""); // must zero since dispatch appends. 
+
+        // put the xes there if we should
+        if(lidx>PROGRAM_LENGTH) strcpy(lbuf,"x");
+        else                    strcpy(lbuf, buf[lidx]);
+        
+        if(ridx>PROGRAM_LENGTH) strcpy(rbuf,"x"); 
+        else                    strcpy(rbuf, buf[ridx]);
+        
+        sprintf(cbuf, const_format, C[idx+(i-1)*N]); // in case we need it
+        
+        latex_dispatch(buf[i], P[idx+(i-1)*N], lbuf, rbuf, cbuf);
+    }
+    fprintf(fp, "%s", buf[1]);
+}
 
 // --------------------------------------------------------------------------------------------------------------
 // --------------------------------------------------------------------------------------------------------------
@@ -949,9 +1096,9 @@ int main(int argc, char** argv)
     CUDA_CHECK();
 
     
-    for(int i=0;i<PROGRAM_LENGTH*N;i++) host_P[i] = random_int_host(NOPS-1);
+    for(int i=0;i<PROGRAM_LENGTH*N;i++) host_P[i] = random_int(NOPS-1);
     for(int i=0;i<NCONSTANTS*N;i++)    {
-        int order = random_int_host(C_MAX_ORDER-C_MIN_ORDER)+C_MIN_ORDER; 
+        int order = random_int(C_MAX_ORDER-C_MIN_ORDER)+C_MIN_ORDER; 
         host_C[i] = CONSTANT_SCALE * powf(10.0,order) * random_normal();
     }
     
@@ -1010,6 +1157,10 @@ int main(int argc, char** argv)
                 displaystring("%.10f", N, h, host_P, host_C, fp);
                 fprintf(fp, "\"\t\"");
                 
+                display_latex("%.2f", N, h, host_P, host_C, fp);
+                fprintf(fp, "\"\t\"");
+                
+                
                 for(int i=0;i<PROGRAM_LENGTH;i++) {
                     fprintf(fp, "%c", PROGRAM_CODE[host_P[h+N*i]]);
                 }
@@ -1027,19 +1178,19 @@ int main(int argc, char** argv)
             fclose(fp);
         }
         
-        // find the median 
+        // find the cutoff 
 	bayes_t host_posterior[N];
 	for(int h=0;h<N;h++) host_posterior[h] = host_prior[h]+host_likelihood[h];
 	qsort( (void*)host_posterior, N, sizeof(bayes_t), cmp);
-	bayes_t median = host_posterior[N/2];
+  	bayes_t cutoff = host_posterior[int(N*RESAMPLE_QUANTILE)];
         
-        // Now resample from the prior if we are too bad -- worse than the median
+        // Now resample from the prior if we are too bad -- worse than the cutoff
         for(int h=0;h<N;h++) {
-            if(host_prior[h]+host_likelihood[h] < median) {
+            if(host_prior[h]+host_likelihood[h] < cutoff) {
                 // randomize
-                for(int i=0;i<PROGRAM_LENGTH;i++) host_P[h+i*N] = random_int_host(NOPS-1);
+                for(int i=0;i<PROGRAM_LENGTH;i++) host_P[h+i*N] = random_int(NOPS-1);
                 for(int i=0;i<NCONSTANTS;i++)   {
-                    int order = random_int_host(C_MAX_ORDER-C_MIN_ORDER)+C_MIN_ORDER; 
+                    int order = random_int(C_MAX_ORDER-C_MIN_ORDER)+C_MIN_ORDER; 
                     host_C[h+i*N] = CONSTANT_SCALE * powf(10.0,order) * random_normal();    
                 }
             }
@@ -1061,7 +1212,7 @@ int main(int argc, char** argv)
     // Cleanup
     // -----------------------------------------------------------------------
     
-    fprintf(stderr, " Completed, cleaning up. \n");
+    fprintf(stderr, " Completed. \n");
     
     cudaFreeHost(host_P);
     cudaFreeHost(host_C);
