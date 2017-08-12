@@ -534,7 +534,7 @@ __device__ bayes_t compute_prior(int N, int idx, op* P, data_t* C) {
  
     // the prior is going to be (1/NOPS)**(PRIOR_MULTIPLIER * LENGTH)
     
-    bayes_t prior = -PRIOR_MULTIPLIER * length * NOPS;
+    bayes_t prior = -PRIOR_MULTIPLIER * length * log((bayes_t)NOPS);
     for(int c=0;c<NCONSTANTS;c++) {
         prior += lcauchypdf(C[idx+c*N], CONSTANT_SCALE); // proportional to cauchy density
 //         prior += lnormalpdf(C[idx+c*N], CONSTANT_SCALE);
