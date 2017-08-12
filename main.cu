@@ -32,6 +32,7 @@ const int NCONSTANTS     = 31; // each op may use a constant if it wants (but mo
 const float CONSTANT_SCALE = 1.0; // Scales the constants in the prior
 const int C_MAX_ORDER = 4; //  constants are chosen with scales between 10^C_MIN_ORDER and 10^C_MAX_ORDER
 const int C_MIN_ORDER = -4; 
+const float PROPOSE_INT = 0.1; // what proportion of the time do we propose to an integer?
 const float P_PROPOSE_C_GEOMETRIC = 1.0; // how often do we propose setting a constant to an integer?
 const float PROPOSE_GEOM_R = 0.1; // higher means we propose to higher integers (geometric rate on proposal)
 
@@ -243,8 +244,11 @@ __device__ float random_normal(RNG_DEF) {
 }
 
 __device__ float random_cauchy(RNG_DEF) {
-    float u = random_float(RNG_ARGS);
-    return tanf(PIf*(u-0.5));
+//     float u = random_float(RNG_ARGS);
+//     return tanf(PIf*(u-0.5));
+    float u = random_normal(RNG_ARGS);
+    float v = random_normal(RNG_ARGS);
+    return u/v;       
 }
    
 __device__ float random_geometric(float r, RNG_DEF) {
@@ -283,8 +287,12 @@ __host__ float random_normal() {
 }
 
 __host__ float random_cauchy() {
-    float u = random_float();
-    return tanf(PIf*(u-0.5));
+    // in simulations in R, the CDF method does not work well compared to ratio of normals 
+//     float u = random_float();
+//     return tanf(PIf*(u-0.5));
+    float u = random_normal();
+    float v = random_normal();
+    return u/v; 
 }
 
 //
@@ -466,58 +474,6 @@ __device__ bayes_t compute_likelihood(int N, int idx, op* P, data_t* C, datum* D
 // Compute the prior
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-/*
-__device__ __host__ float dispatch_length(op o, float a, float b, float c__unusued) {
-    // count up the length for the prior
-    // c is unused
-        switch(o) {
-            case ONE:    return 0;
-            case CONST:  return CONST_LENGTH_PRIOR;
-            case INV:    return 1+a;
-            case A:      return a; 
-            case B:      return b; // need both since of how consts are passed in
-            case PLUS:   return 1+a+b;
-            case CPLUS:  return CONST_LENGTH_PRIOR+a+1;
-            case MINUS:  return 1+a+b;
-            case RMINUS: return 1+b+a;
-            case TIMES:  return 1+a+b;
-            case CTIMES: return CONST_LENGTH_PRIOR+a+1;
-            case DIV:    return 1+a+b;
-            case RDIV:   return 1+a+b;
-            case SQRT:   return 2+a;
-            case SQR:    return 2+a;
-            case LOG:    return 3+a;
-            case SIN:    return 3+a;
-            case ASIN:   return 3+a;
-            case COS:    return 3+a;
-            case ACOS:   return 3+a;
-            case TAN:    return 3+a;
-            case ATAN:   return 3+a;
-            case EXP:    return 2+a;
-            case POW:    return 2+a+b;
-            case CPOW:   return CONST_LENGTH_PRIOR+a+2;
-            case RPOW:   return 2+b+a;
-            case CRPOW:  return CONST_LENGTH_PRIOR+a+2;
-            case GAMMA:  return 4+a;
-            case BESSEL: return 4+a;
-            case ABS:    return 3+a;
-            case E:      return PHYSICAL_CONSTANT_LENGTH_PRIOR; // elementary charge
-            case PI:     return PHYSICAL_CONSTANT_LENGTH_PRIOR; // TAU/2
-            case CLIGHT: return PHYSICAL_CONSTANT_LENGTH_PRIOR; // speed of light
-            case G:      return PHYSICAL_CONSTANT_LENGTH_PRIOR; // gravitational constant
-            case HBAR:   return PHYSICAL_CONSTANT_LENGTH_PRIOR; // reduced planck's constant
-            case MU0:    return PHYSICAL_CONSTANT_LENGTH_PRIOR; // magnetic constant
-            case EL:     return PHYSICAL_CONSTANT_LENGTH_PRIOR; //elementary charge
-            case MP:     return PHYSICAL_CONSTANT_LENGTH_PRIOR; // proton mass
-            case ME:     return PHYSICAL_CONSTANT_LENGTH_PRIOR; // electron mass
-            case LOGOF2: return PHYSICAL_CONSTANT_LENGTH_PRIOR;
-            case HALF:   return 1+a;
-            case E0:     return PHYSICAL_CONSTANT_LENGTH_PRIOR;
-            case KB:     return PHYSICAL_CONSTANT_LENGTH_PRIOR;
-            default:     return 0.0/0.0; // nan CUDART_NAN_F
-        }    
-}*/
-
 
 __device__ __host__ float dispatch_length(op o, float a, float b, float c__unusued) {
     // count up the length for the prior
@@ -566,7 +522,7 @@ __device__ __host__ float dispatch_length(op o, float a, float b, float c__unusu
             case HALF:   return 1+a;
             case E0:     return PHYSICAL_CONSTANT_LENGTH_PRIOR;
             case KB:     return PHYSICAL_CONSTANT_LENGTH_PRIOR;
-            default:     return 0.0/0.0; // nan CUDART_NAN_F
+            default:     return 0.0/0.0; // nan 
         }    
 }
 
@@ -699,6 +655,8 @@ __global__ void MH_simple_kernel(int N, op* P, data_t* C, datum* D, int ndata, i
                 bayes_t proposal_prior = compute_prior(N, idx, P, C);
                 bayes_t proposal_likelihood = compute_likelihood(N, idx, P, C, D, ndata);
                 bayes_t proposal_posterior = proposal_prior + proposal_likelihood;
+                
+                // TODO: Check here -- do we have to count the tree size?
                         
                 if(is_valid(proposal_posterior) && (proposal_posterior>current_posterior || random_float(RNG_ARGS) < expf(proposal_posterior-current_posterior))) {
                     current_posterior = proposal_posterior; // store the updated posterior
@@ -714,7 +672,7 @@ __global__ void MH_simple_kernel(int N, op* P, data_t* C, datum* D, int ndata, i
 		
         } 
         else { // propose to a constant otherwise
-            bayes_t fb = 0.0; //log forward - log backward probability
+            bayes_t forward = 0.0, backward = 0.0; //log forward - log backward probability
             
             // In this version, we propose to all constants, but with varying scales
             for(int c=0;c<NCONSTANTS;c++) {
@@ -727,20 +685,25 @@ __global__ void MH_simple_kernel(int N, op* P, data_t* C, datum* D, int ndata, i
                     /* To deal with the unused constants, here we mix tegether a random_geometric and a normal
                      * This is necessary or else the prior of the unused constants matters a lot. 
                      */
-                    if(random_float(RNG_ARGS) < 0.5) { // propose to an integer
-		        float sgn = -1 + (random_float(RNG_ARGS) < 0.5)*2; // -1 or 1
+                    if(random_float(RNG_ARGS) < PROPOSE_INT) { // propose to an integer
+		        float sgn = random_float(RNG_ARGS) < 0.5 ? -1.0 : 1.0; // -1 or 1
+		        
                         C[i] = sgn*random_geometric(PROPOSE_GEOM_R, RNG_ARGS)-1; // shift by 1 to make 0 the least of support
-                        fb = lgeometricpdf(C[i]+1, PROPOSE_GEOM_R); // forward
+                        
+                        forward += lgeometricpdf(C[i]+1, PROPOSE_GEOM_R) + (C[i]==0.0 ? 0.0 : log(2.0)) + log(PROPOSE_INT); // forward, counting two ways to get to 0.0 (+/-)
                     } else { // propose from the prior 
                         C[i] = CONSTANT_SCALE * random_normal(RNG_ARGS);  
-                        fb = lnormalpdf(C[i]/CONSTANT_SCALE, 1.0); // forward
+                        forward += lnormalpdf(C[i]/CONSTANT_SCALE, 1.0) + log(1.0-PROPOSE_INT); // forward
                     }
 
-                    // subtract the backward
+                    // the backward
                     if( is_int(old_C[c]) ) { 
-                        fb -= logplusexp(lgeometricpdf(old_C[c]+1, PROPOSE_GEOM_R), lnormalpdf(old_C[c]/CONSTANT_SCALE, 1.0));
+                        // two ways to go back if it's an int--a proposal from the prior or an integer proposal
+                        backward += logplusexp(lgeometricpdf(old_C[c]+1, PROPOSE_GEOM_R) + (C[i]==0.0 ? 0.0 : log(2.0)) + log(PROPOSE_INT), 
+                                               lnormalpdf(old_C[c]/CONSTANT_SCALE, 1.0) + log(1.0-PROPOSE_INT));
                     } else {
-                        fb -= lnormalpdf(old_C[c]/CONSTANT_SCALE, 1.0);
+                        // otherwise we can only go back with a prior proposal
+                        backward += lnormalpdf(old_C[c]/CONSTANT_SCALE, 1.0) + log(1.0-PROPOSE_INT);
                     }
                     
                     
@@ -749,19 +712,22 @@ __global__ void MH_simple_kernel(int N, op* P, data_t* C, datum* D, int ndata, i
                     // Most of our proposals are just normal centered on the current value.                     
                     int order = random_int(C_MAX_ORDER-C_MIN_ORDER,RNG_ARGS)+C_MIN_ORDER; // what order of magnitude?
                     C[i] = C[i] + CONSTANT_SCALE * powf(10.0,order) * random_normal(RNG_ARGS);        
-                    fb = 0.0; // proposal is symmetric
+                    // proposal is symmetric so no forward/backward
                 }
             }
             
             bayes_t proposal_prior = compute_prior(N, idx, P, C);
             bayes_t proposal_likelihood = compute_likelihood(N, idx, P, C, D, ndata);
-            bayes_t proposal_posterior = proposal_prior + proposal_likelihood - fb;
-                    
-            if((is_valid(proposal_posterior) && (proposal_posterior>current_posterior || random_float(RNG_ARGS) < expf(proposal_posterior-current_posterior))) || is_invalid(current_posterior)) {
+            bayes_t proposal_posterior = proposal_prior + proposal_likelihood;
+            
+            bayes_t acceptance = proposal_posterior + backward - forward;
+            
+            if((is_valid(acceptance) && (proposal_posterior>current_posterior || random_float(RNG_ARGS) < expf(acceptance))) || is_invalid(current_posterior)) {
                 current_posterior = proposal_posterior; // store the updated posterior
                 current_likelihood = proposal_likelihood;
                 current_prior = proposal_prior;
             } else {
+                /// on reject we restore
                 for(int c=0;c<NCONSTANTS;c++) {
                     int i = idx+N*c;  
                     C[i] = old_C[c];
@@ -875,17 +841,17 @@ void latex_dispatch( char* target, op o, const char* a, const char* b, const cha
             case CPLUS: strcat(target, ""); strcat(target, a); strcat(target, "+"); strcat(target, C); strcat(target, ""); break;
             case MINUS: strcat(target, ""); strcat(target, a); strcat(target, "-"); strcat(target, b); strcat(target, ""); break;
             case RMINUS:strcat(target, ""); strcat(target, b); strcat(target, "-"); strcat(target, a); strcat(target, ""); break;
-            case TIMES: strcat(target, ""); strcat(target, b); strcat(target, "\\cdot "); strcat(target, a); strcat(target, ""); break;
-            case CTIMES:strcat(target, ""); strcat(target, a); strcat(target, "\\cdot "); strcat(target, C); strcat(target, ""); break;
+            case TIMES: strcat(target, ""); strcat(target, b); strcat(target, " "); strcat(target, a); strcat(target, ""); break;
+            case CTIMES:strcat(target, ""); strcat(target, a); strcat(target, " \\cdot "); strcat(target, C); strcat(target, ""); break;
             case DIV:   strcat(target, "\\frac{"); strcat(target, a); strcat(target, "}{"); strcat(target, b); strcat(target, "}"); break;
             case RDIV:  strcat(target, "\\frac{"); strcat(target, b); strcat(target, "}{"); strcat(target, a); strcat(target, "}"); break;
             case LOG:   strcat(target, "\\log("); strcat(target, a); strcat(target, ")"); break;
-            case SIN:   strcat(target, "\\sin("); strcat(target, a); strcat(target, ")"); break;
-            case ASIN:  strcat(target, "\\asin("); strcat(target, a); strcat(target, ")"); break;
-            case COS:   strcat(target, "\\cos("); strcat(target, a); strcat(target, ")"); break;
-            case ACOS:  strcat(target, "\\acos("); strcat(target, a); strcat(target, ")"); break;
-            case TAN:   strcat(target, "\\tan("); strcat(target, a); strcat(target, ")"); break;
-            case ATAN:  strcat(target, "\\atan("); strcat(target, a); strcat(target, ")"); break;
+            case SIN:   strcat(target, "sin("); strcat(target, a); strcat(target, ")"); break;
+            case ASIN:  strcat(target, "asin("); strcat(target, a); strcat(target, ")"); break;
+            case COS:   strcat(target, "cos("); strcat(target, a); strcat(target, ")"); break;
+            case ACOS:  strcat(target, "acos("); strcat(target, a); strcat(target, ")"); break;
+            case TAN:   strcat(target, "tan("); strcat(target, a); strcat(target, ")"); break;
+            case ATAN:  strcat(target, "atan("); strcat(target, a); strcat(target, ")"); break;
             case SQR:   strcat(target, "(("); strcat(target, a); strcat(target, ")^2)"); break;
             case SQRT:  strcat(target, "\\sqrt{"); strcat(target, a); strcat(target, "}"); break;
             case EXP:   strcat(target, "e^{"); strcat(target, a); strcat(target, "}"); break;
@@ -895,7 +861,7 @@ void latex_dispatch( char* target, op o, const char* a, const char* b, const cha
             case CRPOW: strcat(target, ""); strcat(target, C); strcat(target, "^{"); strcat(target, a); strcat(target, "}"); break;
             case GAMMA: strcat(target, "\\Gamma("); strcat(target,a); strcat(target, ")"); break;
             case BESSEL:strcat(target, "J_0("); strcat(target, a); strcat(target, ",0)"); break;
-            case ABS:   strcat(target, "\\mid"); strcat(target, a); strcat(target, "\\mid"); break;
+            case ABS:   strcat(target, "\\mid "); strcat(target, a); strcat(target, "\\mid "); break;
             
             
             case E:      strcat(target, "e"); break; // elementary charge
