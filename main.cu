@@ -545,6 +545,10 @@ __device__ bayes_t compute_prior(int N, int idx, op* P, data_t* C) {
 
 
 
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Count the number of nodes, for MH forward/backward
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
 
 __device__ __host__ int dispatch_countnodes(op o, int a, int b, float __unusued) {
     // dispatch_countnodes is like length but it counts everything as one, for counting the number of nodes
@@ -690,7 +694,7 @@ __global__ void MH_simple_kernel(int N, op* P, data_t* C, datum* D, int ndata, i
     data_t old_C[NCONSTANTS];       // and old constants
     bayes_t forward = 0.0, backward = 0.0; //log forward - log backward probability
            
-	for(int mcmci=0;mcmci<steps;mcmci++) {
+    for(int mcmci=0;mcmci<steps;mcmci++) {
         
 	    if( mcmci % 5 == 0) { // propose to a structure every this often
                 int n;//0-indexed 
@@ -735,74 +739,75 @@ __global__ void MH_simple_kernel(int N, op* P, data_t* C, datum* D, int ndata, i
                     }
                 }
 		
-        } 
-        else { // propose to a constant otherwise
-            
-            // In this version, we propose to all constants, but with varying scales
-            for(int c=0;c<NCONSTANTS;c++) {
-                int i = idx+N*c;  
-                old_C[c] = C[i];
+            } 
+            else { // propose to a constant otherwise
                 
-                // sometimes we propose changing to zero, or away from zero to the prior
-                if(random_float(RNG_ARGS) < P_PROPOSE_C_GEOMETRIC) {
-                    
-                    /* To deal with the unused constants, here we mix tegether a random_geometric and a normal
-                     * This is necessary or else the prior of the unused constants matters a lot. 
-                     */
-                    if(random_float(RNG_ARGS) < PROPOSE_INT) { // propose to an integer
-		        float sgn = random_float(RNG_ARGS) < 0.5 ? -1.0 : 1.0; // -1 or 1
-		        
-                        C[i] = sgn*random_geometric(PROPOSE_GEOM_R, RNG_ARGS)-1; // shift by 1 to make 0 the least of support
-                        
-                        forward += lgeometricpdf(C[i]+1, PROPOSE_GEOM_R) + (C[i]==0.0 ? 0.0 : log(2.0)) + log(PROPOSE_INT); // forward, counting two ways to get to 0.0 (+/-)
-                    } else { // propose from the prior 
-                        C[i] = CONSTANT_SCALE * random_normal(RNG_ARGS);  
-                        forward += lnormalpdf(C[i]/CONSTANT_SCALE, 1.0) + log(1.0-PROPOSE_INT); // forward
-                    }
-
-                    // the backward
-                    if( is_int(old_C[c]) ) { 
-                        // two ways to go back if it's an int--a proposal from the prior or an integer proposal
-                        backward += logplusexp(lgeometricpdf(old_C[c]+1, PROPOSE_GEOM_R) + (C[i]==0.0 ? 0.0 : log(2.0)) + log(PROPOSE_INT), 
-                                               lnormalpdf(old_C[c]/CONSTANT_SCALE, 1.0) + log(1.0-PROPOSE_INT));
-                    } else {
-                        // otherwise we can only go back with a prior proposal
-                        backward += lnormalpdf(old_C[c]/CONSTANT_SCALE, 1.0) + log(1.0-PROPOSE_INT);
-                    }
-                    
-                    
-                }
-                else{
-                    // Most of our proposals are just normal centered on the current value.                     
-                    int order = random_int(C_MAX_ORDER-C_MIN_ORDER,RNG_ARGS)+C_MIN_ORDER; // what order of magnitude?
-                    C[i] = C[i] + CONSTANT_SCALE * powf(10.0,order) * random_normal(RNG_ARGS);        
-                    // proposal is symmetric so no forward/backward
-                }
-            }
-            
-            bayes_t proposal_prior = compute_prior(N, idx, P, C);
-            bayes_t proposal_likelihood = compute_likelihood(N, idx, P, C, D, ndata);
-            bayes_t proposal_posterior = proposal_prior + proposal_likelihood;
-            bayes_t acceptance = proposal_posterior - current_posterior + backward - forward;
-            
-            if((is_valid(proposal_posterior) && (acceptance>0.0 || random_float(RNG_ARGS) < expf(acceptance))) || is_invalid(current_posterior)) {
-                current_posterior = proposal_posterior; // store the updated posterior
-                current_likelihood = proposal_likelihood;
-                current_prior = proposal_prior;
-            } else {
-                /// on reject we restore
+                // In this version, we propose to all constants, but with varying scales
                 for(int c=0;c<NCONSTANTS;c++) {
                     int i = idx+N*c;  
-                    C[i] = old_C[c];
+                    old_C[c] = C[i];
+                    
+                    // sometimes we propose changing to zero, or away from zero to the prior
+                    if(random_float(RNG_ARGS) < P_PROPOSE_C_GEOMETRIC) {
+                        
+                        /* To deal with the unused constants, here we mix tegether a random_geometric and a normal
+                        * This is necessary or else the prior of the unused constants matters a lot. 
+                        */
+                        if(random_float(RNG_ARGS) < PROPOSE_INT) { // propose to an integer
+                            float sgn = random_float(RNG_ARGS) < 0.5 ? -1.0 : 1.0; // -1 or 1
+                            
+                            C[i] = sgn*random_geometric(PROPOSE_GEOM_R, RNG_ARGS)-1; // shift by 1 to make 0 the least of support
+                            
+                            forward += lgeometricpdf(C[i]+1, PROPOSE_GEOM_R) + (C[i]==0.0 ? 0.0 : log(2.0)) + log(PROPOSE_INT); // forward, counting two ways to get to 0.0 (+/-)
+                        } else { // propose from the prior 
+                            C[i] = CONSTANT_SCALE * random_normal(RNG_ARGS);  
+                            forward += lnormalpdf(C[i]/CONSTANT_SCALE, 1.0) + log(1.0-PROPOSE_INT); // forward
+                        }
+
+                        // the backward
+                        if( is_int(old_C[c]) ) { 
+                            // two ways to go back if it's an int--a proposal from the prior or an integer proposal
+                            backward += logplusexp(lgeometricpdf(old_C[c]+1, PROPOSE_GEOM_R) + (C[i]==0.0 ? 0.0 : log(2.0)) + log(PROPOSE_INT), 
+                                                lnormalpdf(old_C[c]/CONSTANT_SCALE, 1.0) + log(1.0-PROPOSE_INT));
+                        } else {
+                            // otherwise we can only go back with a prior proposal
+                            backward += lnormalpdf(old_C[c]/CONSTANT_SCALE, 1.0) + log(1.0-PROPOSE_INT);
+                        }
+                        
+                        
+                    }
+                    else{
+                        // Most of our proposals are just normal centered on the current value.                     
+                        int order = random_int(C_MAX_ORDER-C_MIN_ORDER,RNG_ARGS)+C_MIN_ORDER; // what order of magnitude?
+                        C[i] = C[i] + CONSTANT_SCALE * powf(10.0,order) * random_normal(RNG_ARGS);        
+                        // proposal is symmetric so no forward/backward
+                    }
                 }
+                
+                bayes_t proposal_prior = compute_prior(N, idx, P, C);
+                bayes_t proposal_likelihood = compute_likelihood(N, idx, P, C, D, ndata);
+                bayes_t proposal_posterior = proposal_prior + proposal_likelihood;
+                bayes_t acceptance = proposal_posterior - current_posterior + backward - forward;
+                
+                if((is_valid(proposal_posterior) && (acceptance>0.0 || random_float(RNG_ARGS) < expf(acceptance))) || is_invalid(current_posterior)) {
+                    current_posterior = proposal_posterior; // store the updated posterior
+                    current_likelihood = proposal_likelihood;
+                    current_prior = proposal_prior;
+                } else {
+                    /// on reject we restore
+                    for(int c=0;c<NCONSTANTS;c++) {
+                        int i = idx+N*c;  
+                        C[i] = old_C[c];
+                    }
+                }
+                
+                
+                    
             }
-            
-            
-		
-        }
-//           
+          
       } // end mcmc loop
-	
+      
+    // save these
     prior[idx] = current_prior; 
     likelihood[idx] = current_likelihood;
 }
