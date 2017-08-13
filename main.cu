@@ -2,9 +2,6 @@
  * GPUropolis - 2017 June 20 - Steve Piantadosi 
  *
  * Simple tree-regeneration on CUDA with coalesced memory access
- *     
- * rename proposal, current
- * change power of 10 to power of 2, for speed
  * 
  */
 #include <assert.h>
@@ -32,7 +29,7 @@ const int NCONSTANTS     = 31; // each op may use a constant if it wants (but mo
 const float CONSTANT_SCALE = 1.0; // Scales the constants in the prior
 const int C_MAX_ORDER = 4; //  constants are chosen with scales between 10^C_MIN_ORDER and 10^C_MAX_ORDER
 const int C_MIN_ORDER = -4; 
-const float PROPOSE_INT = 0.1; // what proportion of the time do we propose to an integer?
+const float PROPOSE_INT = 0.15; // what proportion of the time do we propose to an integer?
 const float P_PROPOSE_C_GEOMETRIC = 1.0; // how often do we propose setting a constant to an integer?
 const float PROPOSE_GEOM_R = 0.1; // higher means we propose to higher integers (geometric rate on proposal)
 
@@ -371,7 +368,7 @@ vector<datum>* load_data_file(const char* datapath, const int FIRST_HALF_DATA, c
  
 
 // define a template to fold any function over  
-template<class T> __device__ __host__ T program_fold(int N, int idx, op* P, data_t* C, T leaf, T dispatch(op,T,T,T) ) {
+template<class T> __device__ __host__ T program_fold(int N, int idx, op* P, data_t* C, T leaf, T dispatch(op,T,T,data_t) ) {
    T buf[PROGRAM_LENGTH+1]; // we'll waste one space here at the beginning to simplify everything else
     
     for(int i=PROGRAM_LENGTH;i>=1;i--) { // start at the last node, but with +1 indexing
@@ -475,7 +472,9 @@ __device__ bayes_t compute_likelihood(int N, int idx, op* P, data_t* C, datum* D
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 
-__device__ __host__ float dispatch_length(op o, float a, float b, float c__unusued) {
+
+
+__device__ __host__ float dispatch_length(op o, float a, float b, float __unusued) {
     // count up the length for the prior
     // c is unused
         switch(o) {
@@ -534,7 +533,7 @@ __device__ bayes_t compute_prior(int N, int idx, op* P, data_t* C) {
  
     // the prior is going to be (1/NOPS)**(PRIOR_MULTIPLIER * LENGTH)
     
-    bayes_t prior = -PRIOR_MULTIPLIER * length * log((bayes_t)NOPS);
+    bayes_t prior = -PRIOR_MULTIPLIER * length * log((bayes_t)NOPS+1); // +1 for X (tree leaves, which count in the length)
     for(int c=0;c<NCONSTANTS;c++) {
         prior += lcauchypdf(C[idx+c*N], CONSTANT_SCALE); // proportional to cauchy density
 //         prior += lnormalpdf(C[idx+c*N], CONSTANT_SCALE);
@@ -542,6 +541,66 @@ __device__ bayes_t compute_prior(int N, int idx, op* P, data_t* C) {
     
     return prior;
     
+}
+
+
+
+
+__device__ __host__ int dispatch_countnodes(op o, int a, int b, float __unusued) {
+    // dispatch_countnodes is like length but it counts everything as one, for counting the number of nodes
+        switch(o) {
+            case ONE:    return 1;
+            case CONST:  return 1;
+            case INV:    return 1+a;
+            case A:      return a; 
+            case B:      return b; // need both since of how consts are passed in
+            case PLUS:   return 1+a+b;
+            case CPLUS:  return a+1;
+            case MINUS:  return 1+a+b;
+            case RMINUS: return 1+b+a;
+            case TIMES:  return 1+a+b;
+            case CTIMES: return a+1;
+            case DIV:    return 1+a+b;
+            case RDIV:   return 1+a+b;
+            case SQRT:   return 1+a;
+            case SQR:    return 1+a;
+            case LOG:    return 1+a;
+            case SIN:    return 1+a;
+            case ASIN:   return 1+a;
+            case COS:    return 1+a;
+            case ACOS:   return 1+a;
+            case TAN:    return 1+a;
+            case ATAN:   return 1+a;
+            case EXP:    return 1+a;
+            case POW:    return 1+a+b;
+            case CPOW:   return a+1;
+            case RPOW:   return 1+b+a;
+            case CRPOW:  return a+1;
+            case GAMMA:  return 1+a;
+            case BESSEL: return 1+a;
+            case ABS:    return 1+a;
+            case E:      return 1; // elementary charge
+            case PI:     return 1; // TAU/2
+            case CLIGHT: return 1; // speed of light
+            case G:      return 1; // gravitational constant
+            case HBAR:   return 1; // reduced planck's constant
+            case MU0:    return 1; // magnetic constant
+            case EL:     return 1; //elementary charge
+            case MP:     return 1; // proton mass
+            case ME:     return 1; // electron mass
+            case LOGOF2: return 1;
+            case HALF:   return 1+a;
+            case E0:     return 1;
+            case KB:     return 1;
+            default:     return 0.0/0.0; // nan 
+        }    
+}
+
+
+__device__ int count_nodes(int N, int idx, op* P, data_t* C) {
+   
+    // X is passed as zero since we can't replace those nodes
+    return program_fold<int>(N, idx, P, C, 0, dispatch_countnodes);  
 }
 
 
@@ -629,12 +688,17 @@ __global__ void MH_simple_kernel(int N, op* P, data_t* C, datum* D, int ndata, i
     
     op old_program[PROGRAM_LENGTH]; // store a buffer for the old program
     data_t old_C[NCONSTANTS];       // and old constants
-    
+    bayes_t forward = 0.0, backward = 0.0; //log forward - log backward probability
+           
 	for(int mcmci=0;mcmci<steps;mcmci++) {
         
 	    if( mcmci % 5 == 0) { // propose to a structure every this often
                 int n;//0-indexed 
                 
+                forward = -log((float)count_nodes( N, idx, P, C) );
+                
+                
+                // TODO: only proposed to used branches?
                 if(is_invalid(current_posterior)){
                    n = 0; // always propose to the root if we're terrible
                 } else {
@@ -652,13 +716,14 @@ __global__ void MH_simple_kernel(int N, op* P, data_t* C, datum* D, int ndata, i
                     
                 }
                 
+                backward = -log((float)count_nodes( N, idx, P, C) );
+                
                 bayes_t proposal_prior = compute_prior(N, idx, P, C);
                 bayes_t proposal_likelihood = compute_likelihood(N, idx, P, C, D, ndata);
                 bayes_t proposal_posterior = proposal_prior + proposal_likelihood;
-                
-                // TODO: Check here -- do we have to count the tree size?
+                bayes_t acceptance = proposal_posterior - current_posterior + backward - forward;
                         
-                if(is_valid(proposal_posterior) && (proposal_posterior>current_posterior || random_float(RNG_ARGS) < expf(proposal_posterior-current_posterior))) {
+                if((is_valid(proposal_posterior) && (acceptance>0.0 || random_float(RNG_ARGS) < expf(acceptance))) || is_invalid(current_posterior)) {
                     current_posterior = proposal_posterior; // store the updated posterior
                     current_likelihood = proposal_likelihood;
                     current_prior = proposal_prior;
@@ -672,7 +737,6 @@ __global__ void MH_simple_kernel(int N, op* P, data_t* C, datum* D, int ndata, i
 		
         } 
         else { // propose to a constant otherwise
-            bayes_t forward = 0.0, backward = 0.0; //log forward - log backward probability
             
             // In this version, we propose to all constants, but with varying scales
             for(int c=0;c<NCONSTANTS;c++) {
@@ -719,10 +783,9 @@ __global__ void MH_simple_kernel(int N, op* P, data_t* C, datum* D, int ndata, i
             bayes_t proposal_prior = compute_prior(N, idx, P, C);
             bayes_t proposal_likelihood = compute_likelihood(N, idx, P, C, D, ndata);
             bayes_t proposal_posterior = proposal_prior + proposal_likelihood;
+            bayes_t acceptance = proposal_posterior - current_posterior + backward - forward;
             
-            bayes_t acceptance = proposal_posterior + backward - forward;
-            
-            if((is_valid(acceptance) && (proposal_posterior>current_posterior || random_float(RNG_ARGS) < expf(acceptance))) || is_invalid(current_posterior)) {
+            if((is_valid(proposal_posterior) && (acceptance>0.0 || random_float(RNG_ARGS) < expf(acceptance))) || is_invalid(current_posterior)) {
                 current_posterior = proposal_posterior; // store the updated posterior
                 current_likelihood = proposal_likelihood;
                 current_prior = proposal_prior;
